@@ -49,6 +49,14 @@ flags:
     description: Add Parser2 to benchmarks
     manual: true
     default: false
+  benchmark-generated-parser:
+    description: Enable benchmarks for generated parser (TODO must be placed in ...)
+    manual: true
+    default: false
+  benchmark-extended-data:
+    description: Enable benchmarks on additional XML-files with wide range of sizes
+    manual: true
+    default: false
 
 library:
   source-dirs:
@@ -209,6 +217,24 @@ benchmarks:
     when:
       - condition: flag(use-parser2)
         cpp-options: -DBENCH_USE_PARSER2
+
+  parser-generated:
+    main: Main.hs
+    source-dirs:
+      - bench/generated
+    dependencies:
+      - xml-typelift
+      - criterion
+      - scientific
+      - time
+      - vector
+    ghc-options: -O2
+    when:
+      - condition: flag(benchmark-generated-parser)
+        cpp-options: -DBENCHMARK_GENERATED_PARSER
+      - condition: flag(benchmark-extended-data)
+        cpp-options: -DBENCHMARK_EXTENDED_DATA_SOURCE
+
 tests:
   unit-tests:
     source-dirs:
