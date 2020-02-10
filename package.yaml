@@ -57,6 +57,10 @@ flags:
     description: Enable benchmarks on additional XML-files with wide range of sizes
     manual: true
     default: false
+  benchmark-other-tools:
+    description: Enable benchmarks for other tools
+    manual: true
+    default: false
 
 library:
   source-dirs:
@@ -195,6 +199,8 @@ benchmarks:
     when:
       - condition: flag(use-parser2)
         cpp-options: -DBENCH_USE_PARSER2
+      - condition: flag(benchmark-extended-data)
+        cpp-options: -DBENCHMARK_EXTENDED_DATA_SOURCE
   generated-parsers-memory:
     main: Main.hs
     source-dirs:
@@ -217,6 +223,8 @@ benchmarks:
     when:
       - condition: flag(use-parser2)
         cpp-options: -DBENCH_USE_PARSER2
+      - condition: flag(benchmark-extended-data)
+        cpp-options: -DBENCHMARK_EXTENDED_DATA_SOURCE
 
   parser-generated:
     main: Main.hs
@@ -234,6 +242,12 @@ benchmarks:
         cpp-options: -DBENCHMARK_GENERATED_PARSER
       - condition: flag(benchmark-extended-data)
         cpp-options: -DBENCHMARK_EXTENDED_DATA_SOURCE
+      - condition: flag(benchmark-other-tools)
+        cpp-options: -DBENCHMARK_OTHER_TOOLS
+        dependencies:
+          - pugixml
+          - hexpat
+          - hexml
 
 tests:
   unit-tests:
