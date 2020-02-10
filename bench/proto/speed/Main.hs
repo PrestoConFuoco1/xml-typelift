@@ -57,18 +57,3 @@ main =
                     , bench "parser-7-only-array"   $ nf parseToArray7 input
                     ]))
             filenames
-
-
---main :: IO ()
---main = do
---    let xmlfn    = "test/customersOrders.xml"
---    xmlfile <- BS.readFile xmlfn
---    let (Right xml) = parse xmlfile
---        (res::(Result TopLevel)) = fromXML xml
---    putStrLn "Result of parsing:"
---    pPrint res
---    ----
---    let res4 = parseMethod4 xmlfile
---    putStrLn "------------------"
---    putStrLn "Result of parsing:"
---    pPrint res4
