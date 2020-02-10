@@ -237,6 +237,7 @@ benchmarks:
       - time
       - vector
     ghc-options: -O2
+    extra-libraries:     stdc++
     when:
       - condition: flag(benchmark-generated-parser)
         cpp-options: -DBENCHMARK_GENERATED_PARSER
