@@ -14,6 +14,8 @@ import Language.Haskell.TH.Lib
 import System.FilePath.Posix
 import Test.Hspec
 import Text.InterpolatedString.Perl6 (qc)
+import qualified GHC.Generics as G
+import Control.DeepSeq
 
 import Tests.Utils
 
@@ -43,11 +45,11 @@ spec = describe "codegen" $ do
                 hsFilepath `declShouldPresent`
                     [d|data Birthplace = Birthplace {
                                   city :: XMLString
-                                , country :: XMLString } deriving Show|]
+                                , country :: XMLString } deriving (Show, G.Generic, NFData)|]
                 hsFilepath `declShouldPresent`
                     [d|data Education = Education {
                                   degree :: XMLString
-                                , yearobtained :: XMLString } deriving Show|]
+                                , yearobtained :: XMLString } deriving (Show, G.Generic, NFData)|]
                 -- TODO:
                 --hsFilepath `declShouldPresent`
                 --    [d|data Person = Person {
@@ -64,7 +66,7 @@ spec = describe "codegen" $ do
                                                         city :: XMLString,
                                                         region :: XMLString,
                                                         postalCode :: XMLString,
-                                                        country :: XMLString} deriving Show|]
+                                                        country :: XMLString} deriving (Show, G.Generic, NFData)|]
 
 
 -- * --------------------------------------------------------------------------
