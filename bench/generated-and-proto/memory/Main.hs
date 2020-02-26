@@ -1,14 +1,18 @@
-{-# LANGUAGE BangPatterns  #-}
-{-# LANGUAGE CPP           #-}
-{-# LANGUAGE TupleSections #-}
-module Main where
+{-# LANGUAGE BangPatterns         #-}
+{-# LANGUAGE CPP                  #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE TupleSections        #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances    #-}
+#ifdef BENCHMARK_GENERATED_PARSER
 
 
 import Control.DeepSeq
 import Control.Monad
 import System.IO.MMap
 import Weigh
-import Xeno.SAX
+
+import XMLSchema as X
 import BenchCommon
 
 import Parser1
@@ -30,8 +34,7 @@ main = do
     !files <- force <$> mapM (\(nm, fn) -> (nm,) <$> mmapFileByteString fn Nothing) filenames
     mainWith $
         forM files $ \(nm, input) -> do
-            func (nm ++ "_validate") validate input
-            func (nm ++ "_validateEx") validate input
+            func (nm ++ "_generated") X.parse input
             func (nm ++ "_parser1") parseMethod1 input
 #ifdef BENCH_USE_PARSER2
             func (nm ++ "_parser2") parseMethod2 input
@@ -42,3 +45,8 @@ main = do
             func (nm ++ "_parser6") parseMethod6 input
             func (nm ++ "_parser7") parseMethod7 input
 
+
+#else
+main :: IO ()
+main = putStrLn "Benchmarking of generator parser is not enabled"
+#endif

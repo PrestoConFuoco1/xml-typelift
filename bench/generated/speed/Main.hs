@@ -7,6 +7,7 @@ import Criterion.Main
 import qualified Data.ByteString as BS
 
 import XMLSchema as X
+import BenchCommon
 
 #ifdef BENCHMARK_OTHER_TOOLS
 import qualified Text.XML.Pugi as Pugi
@@ -16,30 +17,12 @@ import Xeno.SAX
 #endif
 
 
-filenames :: [(String, FilePath)]
-#ifdef BENCHMARK_EXTENDED_DATA_SOURCE
-filenames = [ ("32Mb",  "tmp/customersOrders_00032Mb.xml")
-            , ("64Mb",  "tmp/customersOrders_00064Mb.xml")
-            , ("128Mb", "tmp/customersOrders_00128Mb.xml")
-            , ("256Mb", "tmp/customersOrders_00256Mb.xml")
-            , ("512Mb", "tmp/customersOrders_00512Mb.xml")
-            , ("1024Mb",   "tmp/customersOrders_01024Mb.xml") -- Note: about 25 sec per one file; about 7 min to whole benchmark
-            -- , ("2Gb",   "tmp/customersOrders_02048Mb.xml")
-            -- , ("4Gb",   "tmp/customersOrders_04096Mb.xml")
-            ]
-#else
-filenames = [ ("16Kb",  "test/customersOrders.xml")
-            , ("7.6Mb", "test/customersOrdersBig(incorrect).xml")
-            ]
-#endif
-
-
 main :: IO ()
 main = defaultMain $
     flip map filenames (\(nm, filename) -> env (BS.readFile filename) (\input ->
             bgroup nm
                 [ bench "parser-generated"
-                    $ whnf (fromRight' . X.parser) input
+                    $ whnf (fromRight' . X.parse) input
                 -- , bench "parser-generated-nf"
                 --    $ nf X.parser input
 #ifdef BENCHMARK_OTHER_TOOLS
