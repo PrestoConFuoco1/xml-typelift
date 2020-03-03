@@ -197,7 +197,8 @@ benchmarks:
       - scientific
       - time
       - vector
-    ghc-options: -O2 -rtsopts
+      - xml-typelift
+    ghc-options: -O2
     when:
       - condition: flag(use-parser2)
         cpp-options: -DBENCH_USE_PARSER2
@@ -222,7 +223,8 @@ benchmarks:
       - time
       - vector
       - weigh
-    ghc-options: -O2 -rtsopts "-with-rtsopts=-H1G"
+      - xml-typelift
+    ghc-options: -O2
     when:
       - condition: flag(use-parser2)
         cpp-options: -DBENCH_USE_PARSER2
@@ -265,7 +267,7 @@ benchmarks:
       - weigh
       - xml-typelift
       - mmap
-    ghc-options: -O2 -rtsopts "-with-rtsopts=-H1G"
+    ghc-options: -O2
     when:
       - condition: flag(benchmark-generated-parser)
         cpp-options: -DBENCHMARK_GENERATED_PARSER
@@ -277,10 +279,6 @@ benchmarks:
           - pugixml
           - hexpat
           - hexml
-
-
-
-
   generated-and-proto-parsers-speed:
     main: Main.hs
     source-dirs:
@@ -301,7 +299,7 @@ benchmarks:
       - time
       - vector
       - xml-typelift
-    ghc-options: -O2 -rtsopts
+    ghc-options: -O2
     when:
       - condition: flag(benchmark-generated-parser)
         cpp-options: -DBENCHMARK_GENERATED_PARSER
@@ -330,7 +328,6 @@ benchmarks:
       - vector
       - weigh
       - xml-typelift
-    ghc-options: -O2 -rtsopts "-with-rtsopts=-H1G"
     when:
       - condition: flag(benchmark-generated-parser)
         cpp-options: -DBENCHMARK_GENERATED_PARSER
@@ -338,7 +335,6 @@ benchmarks:
         cpp-options: -DBENCH_USE_PARSER2
       - condition: flag(benchmark-extended-data)
         cpp-options: -DBENCHMARK_EXTENDED_DATA_SOURCE
-
 
 tests:
   unit-tests:

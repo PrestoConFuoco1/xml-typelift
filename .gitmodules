@@ -13,3 +13,6 @@
 [submodule "json-autotype"]
 	path = json-autotype
 	url = https://gitlab.com/migamake/json-autotype.git
+[submodule "weigh"]
+	path = weigh
+	url = git@github.com:migamake/weigh

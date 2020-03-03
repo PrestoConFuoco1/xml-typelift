@@ -36,7 +36,8 @@ main = do
     -- not read files again in forked process
     -- files' <- mapM (\(nm, fn) -> (nm,) <$> BS.readFile fn) filenames
     !files <- force <$> mapM (\(nm, fn) -> (nm,) <$> mmapFileByteString fn Nothing) filenames
-    mainWith $
+    mainWith $ do
+        setColumns [Case, Allocated, GCs, Max, MaxOS, MaxRss, Check]
         forM files $ \(nm, input) -> do
             func (nm ++ "_generated") X.parse input
 #ifdef BENCHMARK_OTHER_TOOLS
