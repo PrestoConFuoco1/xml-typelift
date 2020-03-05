@@ -72,3 +72,38 @@ build_8_10:
   extends: .build
   allow_failure: true
 
+build_8_6:
+  variables:
+    GHC_VER: "8.6"
+  extends: .build
+
+build_8_4:
+  variables:
+    GHC_VER: "8.4"
+  extends: .build
+  allow_failure: true
+
+build_8_2:
+  variables:
+    GHC_VER: "8.2"
+  extends: .build
+  allow_failure: true
+
+build_8_0:
+  variables:
+    GHC_VER: "8.0"
+  extends: .build
+  allow_failure: true
+
+build_8_8:
+  variables:
+    GHC_VER: "8.8"
+  extends: .build
+  allow_failure: true
+
+build_8_10:
+  variables:
+    GHC_VER: "8.10"
+  extends: .build
+  allow_failure: true
+
