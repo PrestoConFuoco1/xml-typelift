@@ -9,7 +9,7 @@ export CI_GHC_ADDITIONAL_FLAGS="--system-ghc"
 # when running this script locally in developer's working directory
 stack install --system-ghc --allow-different-user
 stack build   --system-ghc --allow-different-user
-stack test    --system-ghc --allow-different-user
+stack test    --system-ghc --allow-different-user xml-typelift:test:unit-tests
 
 # check that CLI application is working and output is reasonable
 message "Check CLI"
