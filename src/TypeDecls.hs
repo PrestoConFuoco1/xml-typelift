@@ -77,7 +77,7 @@ makeCommonDerivingClause = do
     nfdataDc  <- newName'' (B.byteString "NFData")
     let dcs = [ConT showDc, ConT genericDc, ConT nfdataDc]
 #if MIN_VERSION_template_haskell(2,12,0)
-    return $ DerivClause Nothing dcs
+    return [DerivClause Nothing dcs]
 #else
     return dcs
 #endif
@@ -88,8 +88,8 @@ declareAlgebraicType    (_,          []) = error "Empty list of records"
 declareAlgebraicType    (tyDataName,   records) =
     out $ do dataName <- newDataName tyDataName
              recs     <- mapM formatRecord records
-             showDc   <- makeCommonDerivingClause
-             return $ DataD [] dataName [] Nothing recs [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ DataD [] dataName [] Nothing recs derivClauses
 
 
 formatRecord :: Record -> Q Con
@@ -109,21 +109,21 @@ declareSumType :: SumType
                -> CG ()
 declareSumType (tyName, []) =
     out $ do dataName <- newDataName tyName
-             showDc   <- makeCommonDerivingClause
-             return $ DataD [] dataName [] Nothing [NormalC dataName []] [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ DataD [] dataName [] Nothing [NormalC dataName []] derivClauses
 declareSumType (tyDataName, sumTypes) =
     out $ do dataName <- newDataName tyDataName
              constrs  <- mapM (uncurry mkNormalC) sumTypes
-             showDc   <- makeCommonDerivingClause
-             return $ DataD [] dataName [] Nothing constrs [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ DataD [] dataName [] Nothing constrs derivClauses
 
 
 declareNewtype :: TyData -> TyCon -> TyType -> CG ()
 declareNewtype tyDataName tyConstr baseTy =
     out $ do dataName <- newDataName tyDataName
              constr   <- mkNormalC tyConstr baseTy
-             showDc   <- makeCommonDerivingClause
-             return $ NewtypeD [] dataName [] Nothing constr [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ NewtypeD [] dataName [] Nothing constr derivClauses
 
 
 mkNormalC :: TyCon -> TyType -> Q TH.Con
