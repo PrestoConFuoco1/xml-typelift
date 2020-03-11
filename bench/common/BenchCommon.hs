@@ -16,8 +16,8 @@ filenames = [ ("32Mb",   "tmp/generated/customersOrders_00032Mb.xml")
             -}
             ]
 #else
-filenames = [ ("16Kb",  "test/customersOrders.xml")
-            , ("7.6Mb", "test/customersOrdersBig(incorrect).xml")
+filenames = [ ("16Kb",  "test/data/customersOrders.xml")
+            , ("7.6Mb", "test/data/customersOrdersBig(incorrect).xml")
             ]
 #endif
 
