@@ -15,4 +15,4 @@
 	url = https://gitlab.com/migamake/json-autotype.git
 [submodule "weigh"]
 	path = weigh
-	url = git@github.com:migamake/weigh
+	url = https://github.com/migamake/weigh
