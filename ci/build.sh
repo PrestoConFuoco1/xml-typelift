@@ -39,7 +39,7 @@ if ghc --numeric-version | grep --quiet "^8.10" ; then
     # (so we wait for updating proper packages)
     echo "Benchmarks for 8.10 currently unsupported"
 else
-    timeout 30m cabal v2-bench generated-parsers-memory
-    timeout 30m cabal v2-bench generated-parsers-speed
+    timeout 30m cabal v2-bench proto-parsers-memory
+    timeout 30m cabal v2-bench proto-parsers-speed
 fi
 
