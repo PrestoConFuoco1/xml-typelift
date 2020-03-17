@@ -4,7 +4,9 @@ source ci/common.sh
 
 # Build it
 message "Build it"
-export CI_GHC_ADDITIONAL_FLAGS="--system-ghc"
+# TODO: fix cache saving bug
+rm -rf .stack-work
+#export CI_GHC_ADDITIONAL_FLAGS="--system-ghc --allow-different-user"
 # Note: `--allow-different-user` flag is for debugging purpose,
 # when running this script locally in developer's working directory
 stack install --system-ghc --allow-different-user
