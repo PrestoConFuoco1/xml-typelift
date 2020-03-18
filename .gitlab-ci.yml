@@ -30,9 +30,10 @@ stack_build:
     - echo ${CI_COMMIT_REF_SLUG}
   script:
     - ci/stack-build.sh
-  cache:
-    paths:
-      - .stack-work
+  # Disable using cache due to bug with tests (see issue #69)
+  #cache:
+  #  paths:
+  #    - .stack-work
   allow_failure: false
 
 build_8_2:

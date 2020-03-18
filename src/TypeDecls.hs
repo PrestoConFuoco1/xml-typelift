@@ -64,17 +64,22 @@ newFieldName :: TyFieldName -> Q Name
 newFieldName (TyFieldName bsn) = newName'' bsn
 
 
--- | Creates 'deriving Show' clause
+-- | Creates 'deriving Show, Generic, NFData' clause
+makeCommonDerivingClause
 #if MIN_VERSION_template_haskell(2,12,0)
-makeShowDc :: Q DerivClause
-makeShowDc = do
-    showDc <- newName'' (B.byteString "Show")
-    return $ DerivClause Nothing [ConT showDc]
+                         :: Q [DerivClause]
 #else
-makeShowDc :: Q Pred
-makeShowDc = do
-    showDc <- newName'' (B.byteString "Show")
-    return $ ConT showDc
+                         :: Q [Pred]
+#endif
+makeCommonDerivingClause = do
+    showDc    <- newName'' (B.byteString "Show")
+    genericDc <- newName'' (B.byteString "G.Generic")
+    nfdataDc  <- newName'' (B.byteString "NFData")
+    let dcs = [ConT showDc, ConT genericDc, ConT nfdataDc]
+#if MIN_VERSION_template_haskell(2,12,0)
+    return [DerivClause Nothing dcs]
+#else
+    return dcs
 #endif
 
 
@@ -83,8 +88,8 @@ declareAlgebraicType    (_,          []) = error "Empty list of records"
 declareAlgebraicType    (tyDataName,   records) =
     out $ do dataName <- newDataName tyDataName
              recs     <- mapM formatRecord records
-             showDc   <- makeShowDc
-             return $ DataD [] dataName [] Nothing recs [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ DataD [] dataName [] Nothing recs derivClauses
 
 
 formatRecord :: Record -> Q Con
@@ -104,21 +109,21 @@ declareSumType :: SumType
                -> CG ()
 declareSumType (tyName, []) =
     out $ do dataName <- newDataName tyName
-             showDc   <- makeShowDc
-             return $ DataD [] dataName [] Nothing [NormalC dataName []] [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ DataD [] dataName [] Nothing [NormalC dataName []] derivClauses
 declareSumType (tyDataName, sumTypes) =
     out $ do dataName <- newDataName tyDataName
              constrs  <- mapM (uncurry mkNormalC) sumTypes
-             showDc   <- makeShowDc
-             return $ DataD [] dataName [] Nothing constrs [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ DataD [] dataName [] Nothing constrs derivClauses
 
 
 declareNewtype :: TyData -> TyCon -> TyType -> CG ()
 declareNewtype tyDataName tyConstr baseTy =
     out $ do dataName <- newDataName tyDataName
              constr   <- mkNormalC tyConstr baseTy
-             showDc   <- makeShowDc
-             return $ NewtypeD [] dataName [] Nothing constr [showDc]
+             derivClauses   <- makeCommonDerivingClause
+             return $ NewtypeD [] dataName [] Nothing constr derivClauses
 
 
 mkNormalC :: TyCon -> TyType -> Q TH.Con
