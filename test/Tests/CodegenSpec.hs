@@ -78,17 +78,16 @@ tryCompile isGenerateOnlyTypes xsdFileName =
             compileHaskellModule' compileOpts hsFilename []
   where
     opts = def { generateOnlyTypes = isGenerateOnlyTypes }
-    compileOpts = def { compileArgs = ["-package xml-typelift"] }
 
+compileOpts = def { additionalPackages = ["xml-typelift", "xeno"] }
 
 tryParse :: Bool -> FilePath -> FilePath -> IO ()
 tryParse isUnsafe xsdFileName xmlFileName =
     withGeneratedFile opts xsdFileName $ \hsFilename ->
         checkExitCode "Can't parse file with generated parser" $
-            runHaskellModule hsFilename [xmlFileName]
+            runHaskellModule' compileOpts hsFilename [xmlFileName]
   where
     opts = def { generateOnlyTypes = False, generateUnsafe = isUnsafe }
-
 
 declShouldPresent :: (HasCallStack) => FilePath -> DecsQ -> Expectation
 declShouldPresent hsFilepath decl =
