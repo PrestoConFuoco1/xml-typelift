@@ -43,12 +43,9 @@ import           Errors(parseErrorBs)
 
 import           Data.Generics.Uniplate.Operations
 
-import           Debug.Pretty.Simple
-import           Text.Pretty.Simple
-
-
-
-import           Identifiers
+--import           Debug.Pretty.Simple
+--import           Text.Pretty.Simple
+--import           Identifiers
 
 
 -- | Options for generating

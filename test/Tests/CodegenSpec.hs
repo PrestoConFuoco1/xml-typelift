@@ -79,6 +79,7 @@ tryCompile isGenerateOnlyTypes xsdFileName =
   where
     opts = def { generateOnlyTypes = isGenerateOnlyTypes }
 
+compileOpts :: RunOptions
 compileOpts = def { additionalPackages = ["xml-typelift", "xeno"] }
 
 tryParse :: Bool -> FilePath -> FilePath -> IO ()
