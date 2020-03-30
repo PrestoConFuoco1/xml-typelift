@@ -35,7 +35,7 @@ stack_build:
   #cache:
   #  paths:
   #    - .stack-work
-  allow_failure: false
+  allow_failure: true
 
 build_8_2:
   variables:
