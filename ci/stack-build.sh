@@ -4,6 +4,9 @@ source ci/common.sh
 
 STACKOPTS="--system-ghc --allow-different-user  --fast"
 
+message "Time"
+date
+
 # Build it
 message "Build it"
 #export CI_GHC_ADDITIONAL_FLAGS="--system-ghc --allow-different-user"
