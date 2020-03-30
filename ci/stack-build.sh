@@ -2,7 +2,7 @@
 
 source ci/common.sh
 
-STACKOPTS="--test --system-ghc --allow-different-user  --verbose"
+STACKOPTS="--system-ghc --allow-different-user  --fast"
 
 # Build it
 message "Build it"
@@ -11,7 +11,7 @@ message "Build it"
 # when running this script locally in developer's working directory
 stack install ${STACKOPTS} xml-typelift:exe:xml-typelift-cli
 stack build   ${STACKOPTS} xml-typelift
-stack test    ${STACKOPTS} xml-typelift:test:unit-tests
+stack test    ${STACKOPTS} xml-typelift:test:unit-tests --verbose
 
 # check that CLI application is working and output is reasonable
 message "Check CLI"
