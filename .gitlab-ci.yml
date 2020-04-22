@@ -21,7 +21,6 @@ variables:
       - ${HOME}/.cabal
 
 stack_build:
-  tags: [haskell]
   image: "migamake/stack-build-image:12.26"
   stage: build
   variables:
