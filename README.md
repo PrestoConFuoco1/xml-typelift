@@ -16,6 +16,7 @@ It is part of DataHaskell initiative on type providers in Haskell.
 
 * [Michal](http://github.com/mgajda) - works on this
 * [Kevin](http://github.com/dataopt) - made initial explorations in the playground/, now retired from the project.
+* [Dima](https://github.com/dmalkr) - lots of code and benchmarks, no longer works on this project.
 
 ## How?
 
