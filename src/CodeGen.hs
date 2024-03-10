@@ -14,6 +14,7 @@
 {-# LANGUAGE ViewPatterns              #-}
 {-# OPTIONS_GHC -fno-warn-orphans  #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE BlockArguments #-}
 -- | Here we aim to analyze the schema.
 module CodeGen(GenerateOpts(..), codegen, parserCodegen) where
 
@@ -52,6 +53,8 @@ import qualified Data.Text.Lazy as TL
 import Control.Exception (evaluate)
 import Debug.Trace (trace)
 import GHC.Stack (HasCallStack)
+import Control.Monad.Writer (Writer, MonadWriter (..), execWriter)
+import Control.Monad.Reader
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -331,6 +334,7 @@ generateSchema GenerateOpts{..} sch = do
            declareSumType (TyData topLevelConst, alts)
     pure ()
     declareAlgebraicType $ mkSequenceTypeDeclaration exampleSequenceGI
+    generateFunction $ generateSequenceParseFunctionBody exampleSequenceGI
     pure ()
 
 
@@ -976,6 +980,49 @@ exampleSequenceGI = SequenceGI
   , fields =
     [ FieldGI "departure" "departure" RepMaybe "String"
     , FieldGI "arrival" "arrival" RepOnce "Int"
-    , FieldGI "techStops" "techStops" RepOnce "TechStop"
+    , FieldGI "techStops" "techStops" RepMany "TechStop"
     ]
   }
+
+newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
+
+type CodeWriter = ReaderT Int (Writer [String]) ()
+
+runCodeWriter :: CodeWriter -> [String]
+runCodeWriter action = execWriter $ runReaderT action 0
+
+generateFunction :: FunctionBody -> CG ()
+generateFunction = mapM_ outCodeLine' . unFunctionBody
+
+out1 :: String -> CodeWriter 
+out1 str = do
+  offset <- ask
+  tell . (:[]) $ replicate (2*offset) ' ' <> str
+
+withIndent1 :: CodeWriter -> CodeWriter
+withIndent1 = local (+1)
+
+getParserNameForType :: HaskellTypeName -> String
+getParserNameForType type_ = 
+  "parse" <> cs (B.toLazyByteString type_.unHaskellTypeName) <> "Content"
+
+generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
+generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
+  out1 (getParserNameForType s.typeName <> " arrStart strStart = do") >> withIndent1 do
+    let (arrStart, strStart) = ("arrStart", "strStart")
+        fields = {- s.attributes <> -} s.fields
+    let ofsNames' = ((arrStart, strStart) : [ ( [qc|arrOfs{i}|], [qc|strOfs{i}|]) | i <- [(1::Int)..]])
+                    :: [(XMLString, XMLString)]
+        ofsNames = zip ofsNames' (tail ofsNames')
+    forM_ (zip ofsNames fields) $ \(((arrOfs, strOfs), (arrOfs', strOfs')), field) -> do
+      let parserName = getParserNameForType field.typeName
+      let (isUseArrOfs, tagQuantifier::XMLString) = case field.cardinality of
+              RepMaybe -> (True,  "inMaybeTag")
+              RepOnce  -> (False, "inOneTag")
+              _        -> (True,  "inManyTags")
+          (arrOfs1, arrOfs2)::(XMLString,XMLString) =
+              if isUseArrOfs then ([qc| {arrOfs}|],"") else ("", [qc| {arrOfs}|])
+          tagName = field.xmlName
+      -- TODO parse with attributes!
+      out1 [qc|({arrOfs'}, {strOfs'}) <- {tagQuantifier} "{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
+
