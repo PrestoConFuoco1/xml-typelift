@@ -56,6 +56,7 @@ import GHC.Stack (HasCallStack)
 import Control.Monad.Writer (Writer, MonadWriter (..), execWriter)
 import Control.Monad.Reader
 import Data.Bifunctor (Bifunctor(bimap))
+import qualified Data.List as List
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -1087,6 +1088,27 @@ registerSequenceGI s = do
   registerDataDeclaration $ mkSequenceTypeDeclaration s
   registerExtractionFunction $ generateSequenceExtractFunctionBody s
   registerParseFunction $ generateSequenceParseFunctionBody s
+
+getAllocatedHaskellTypes :: m (Set.Set HaskellTypeName)
+getAllocatedHaskellTypes = undefined
+
+getAllocatedHaskellConstructors :: m (Set.Set HaskellConsName)
+getAllocatedHaskellConstructors = undefined
+
+getUniqueName :: (Monad m, Ord a) => (XMLString -> a) -> XMLString -> m (Set.Set a) -> m a
+getUniqueName mk possibleName getSet = do
+  set <- getSet
+  pure $ fromJust $ List.find (flip Set.notMember set) possibleAlternatives
+  where
+  possibleAlternatives =
+    map mk $
+      possibleName : map ((possibleName <>) . cs . show) [1..100::Int]
+
+getUniqueTypeName :: (Monad m) => XMLString -> m HaskellTypeName
+getUniqueTypeName s = getUniqueName HaskellTypeName s getAllocatedHaskellTypes
+
+getUniqueConsName :: (Monad m) => XMLString -> m HaskellConsName
+getUniqueConsName s = getUniqueName HaskellConsName s getAllocatedHaskellConstructors
 
 processComplex ::
   forall m.
