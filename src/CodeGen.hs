@@ -55,6 +55,7 @@ import Debug.Trace (trace)
 import GHC.Stack (HasCallStack)
 import Control.Monad.Writer (Writer, MonadWriter (..), execWriter)
 import Control.Monad.Reader
+import Data.Bifunctor (Bifunctor(bimap))
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -941,12 +942,12 @@ data SequenceGI = SequenceGI
   , fields :: [FieldGI]
   }
 
-newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: B.Builder}
-  deriving newtype (Show, IsString)
-newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: B.Builder}
-  deriving newtype (Show, IsString)
-newtype HaskellConsName = HaskellConsName {unHaskellConsName :: B.Builder}
-  deriving newtype (Show, IsString)
+newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString}
+  deriving newtype (Eq, Ord, Show, IsString)
+newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
+  deriving newtype (Eq, Ord, Show, IsString)
+newtype HaskellConsName = HaskellConsName {unHaskellConsName :: BS.ByteString}
+  deriving newtype (Eq, Ord, Show, IsString)
 
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
@@ -957,14 +958,14 @@ data FieldGI = FieldGI
 
 mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
 mkSequenceTypeDeclaration s =
-  (TyData s.typeName.unHaskellTypeName
-  , [(TyCon s.consName.unHaskellConsName, map mkFieldDeclaration $ s.attributes <> s.fields)]
+  (TyData $ B.byteString s.typeName.unHaskellTypeName
+  , [(TyCon $ B.byteString s.consName.unHaskellConsName, map mkFieldDeclaration $ s.attributes <> s.fields)]
   )
 
 mkFieldDeclaration :: FieldGI -> TyField
 mkFieldDeclaration fld =
-  ( TyFieldName fld.haskellName.unHaskellFieldName
-  , TyType $ mkCardinality fld.typeName.unHaskellTypeName
+  ( TyFieldName $ B.byteString fld.haskellName.unHaskellFieldName
+  , TyType $ mkCardinality $ B.byteString fld.typeName.unHaskellTypeName
   )
   where
     mkCardinality x = case fld.cardinality of
@@ -1004,7 +1005,10 @@ withIndent1 = local (+1)
 
 getParserNameForType :: HaskellTypeName -> String
 getParserNameForType type_ = 
-  "parse" <> cs (B.toLazyByteString type_.unHaskellTypeName) <> "Content"
+  "parse" <> cs type_.unHaskellTypeName <> "Content"
+
+bld :: XMLString -> B.Builder
+bld = B.byteString
 
 generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
@@ -1014,6 +1018,7 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
     let ofsNames' = ((arrStart, strStart) : [ ( [qc|arrOfs{i}|], [qc|strOfs{i}|]) | i <- [(1::Int)..]])
                     :: [(XMLString, XMLString)]
         ofsNames = zip ofsNames' (tail ofsNames')
+        (arrRet, strRet) = bimap bld bld $ ofsNames' !! length fields
     forM_ (zip ofsNames fields) $ \(((arrOfs, strOfs), (arrOfs', strOfs')), field) -> do
       let parserName = getParserNameForType field.typeName
       let (isUseArrOfs, tagQuantifier::XMLString) = case field.cardinality of
@@ -1025,4 +1030,4 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
           tagName = field.xmlName
       -- TODO parse with attributes!
       out1 [qc|({arrOfs'}, {strOfs'}) <- {tagQuantifier} "{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
-
+    out1 [qc|pure ({arrRet}, {strRet})|]
