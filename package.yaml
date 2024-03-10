@@ -15,6 +15,8 @@ maintainer:          dataopt@example.com
 copyright:           Copyright by Michal Gajda 2018
 category:            Data, Tools, Development
 build-type:          Simple
+default-extensions:
+  - DuplicateRecordFields
 extra-source-files:
   - README.md
   - changelog.md

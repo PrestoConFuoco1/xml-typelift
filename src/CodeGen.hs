@@ -1,3 +1,5 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE CPP                       #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase                #-}
@@ -11,6 +13,7 @@
 {-# LANGUAGE TypeFamilies              #-}
 {-# LANGUAGE ViewPatterns              #-}
 {-# OPTIONS_GHC -fno-warn-orphans  #-}
+{-# LANGUAGE DerivingStrategies #-}
 -- | Here we aim to analyze the schema.
 module CodeGen(GenerateOpts(..), codegen, parserCodegen) where
 
@@ -326,6 +329,9 @@ generateSchema GenerateOpts{..} sch = do
                        forM altTypes
                             (translate (SchemaType, TargetTypeName) topLevelConst . builderString)
            declareSumType (TyData topLevelConst, alts)
+    pure ()
+    declareAlgebraicType $ mkSequenceTypeDeclaration exampleSequenceGI
+    pure ()
 
 
 topLevelConst :: IsString a => a
@@ -913,3 +919,63 @@ generateMainFunction GenerateOpts{..} _schema = do
             outCodeLine' [qc|([], filenames) -> parseAndPrintFiles False filenames|]
             outCodeLine' [qc|(_,  filenames) -> parseAndPrintFiles True  filenames|]
         outCodeLine' "exitSuccess"
+
+data TypeInterface = TypeInterface
+  { typeConsName :: XMLString
+  }
+
+data TypeProcessingResult = TypeProcessingResult
+  { 
+  }
+
+-- GI stands for "generating input"
+-- type for processing sequence inside complexType
+data SequenceGI = SequenceGI
+  { typeName :: HaskellTypeName
+  , consName :: HaskellConsName
+  , attributes :: [FieldGI]
+  , fields :: [FieldGI]
+  }
+
+newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: B.Builder}
+  deriving newtype (Show, IsString)
+newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: B.Builder}
+  deriving newtype (Show, IsString)
+newtype HaskellConsName = HaskellConsName {unHaskellConsName :: B.Builder}
+  deriving newtype (Show, IsString)
+
+data FieldGI = FieldGI
+  { haskellName :: HaskellFieldName
+  , xmlName :: XMLString
+  , cardinality :: Repeatedness
+  , typeName :: HaskellTypeName
+  }
+
+mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
+mkSequenceTypeDeclaration s =
+  (TyData s.typeName.unHaskellTypeName
+  , [(TyCon s.consName.unHaskellConsName, map mkFieldDeclaration $ s.attributes <> s.fields)]
+  )
+
+mkFieldDeclaration :: FieldGI -> TyField
+mkFieldDeclaration fld =
+  ( TyFieldName fld.haskellName.unHaskellFieldName
+  , TyType $ mkCardinality fld.typeName.unHaskellTypeName
+  )
+  where
+    mkCardinality x = case fld.cardinality of
+      RepMaybe -> "Maybe " <> x
+      RepOnce -> x
+      _ -> "[" <> x <> "]"
+
+exampleSequenceGI :: SequenceGI
+exampleSequenceGI = SequenceGI
+  { typeName = "TestType"
+  , consName = "TestCons"
+  , attributes = []
+  , fields =
+    [ FieldGI "departure" "departure" RepMaybe "String"
+    , FieldGI "arrival" "arrival" RepOnce "Int"
+    , FieldGI "techStops" "techStops" RepOnce "TechStop"
+    ]
+  }
