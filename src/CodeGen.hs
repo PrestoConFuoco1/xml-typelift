@@ -336,6 +336,7 @@ generateSchema GenerateOpts{..} sch = do
     pure ()
     declareAlgebraicType $ mkSequenceTypeDeclaration exampleSequenceGI
     generateFunction $ generateSequenceParseFunctionBody exampleSequenceGI
+    generateFunction $ generateSequenceExtractFunctionBody exampleSequenceGI
     pure ()
 
 
@@ -979,9 +980,9 @@ exampleSequenceGI = SequenceGI
   , consName = "TestCons"
   , attributes = []
   , fields =
-    [ FieldGI "departure" "departure" RepMaybe "String"
-    , FieldGI "arrival" "arrival" RepOnce "Int"
-    , FieldGI "techStops" "techStops" RepMany "TechStop"
+    [ FieldGI "departure" "departureElt" RepMaybe "String"
+    , FieldGI "arrival" "arrivalElt" RepOnce "Int"
+    , FieldGI "techStops" "techStopsElt" RepMany "TechStop"
     ]
   }
 
@@ -1031,3 +1032,44 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
       -- TODO parse with attributes!
       out1 [qc|({arrOfs'}, {strOfs'}) <- {tagQuantifier} "{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
     out1 [qc|pure ({arrRet}, {strRet})|]
+
+
+
+generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
+generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
+-- generateContentParser typeName haskellTypeName ty =
+--    case ty of
+--        Complex _ attrs (Seq elts) ->
+  let recType = bld s.typeName.unHaskellTypeName
+  out1 [qc|extract{recType}Content ofs =|]
+  withIndent1 $ do
+      attrFields <- forM s.attributes $ \attr -> do
+          let haskellAttrName = attr.haskellName.unHaskellFieldName
+          out1 [qc|let {bld haskellAttrName} = Nothing in|]
+          return haskellAttrName
+      properFields <- forM (zip s.fields [1..]) $ \(fld, ofsIdx::Int) -> do
+              let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
+                  fieldName = fld.haskellName.unHaskellFieldName
+                  extractor = getExtractorNameWithQuant ofs fld
+              out1 [qc|let ({bld fieldName}, ofs{ofsIdx}) = {extractor} in|]
+              return fieldName
+      let fields = attrFields ++ properFields
+          ofs' = if null fields then "ofs" else [qc|ofs{length fields}|]::XMLString
+          haskellConsName = s.consName.unHaskellConsName
+      case fields of
+          []         -> out1 [qc|({haskellConsName}, {ofs'})|]
+          [oneField] -> out1 [qc|({haskellConsName} {oneField}, {ofs'})|]
+          _          -> out1 [qc|({haskellConsName}\{..}, {ofs'})|]
+
+  where
+    getExtractorNameWithQuant :: XMLString -> FieldGI -> XMLString -- ? Builder
+    getExtractorNameWithQuant ofs fld = do
+        let (fieldQuantifier::(Maybe XMLString)) = case fld.cardinality of
+                RepMaybe -> Just "extractMaybe"
+                RepOnce  -> Nothing
+                _        -> Just "extractMany" -- TODO add extractExact support
+            fieldTypeName = bld fld.typeName.unHaskellTypeName
+        case fieldQuantifier of
+                 Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
+                 Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
+
