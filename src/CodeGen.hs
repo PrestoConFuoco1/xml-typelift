@@ -1037,9 +1037,6 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
 
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
--- generateContentParser typeName haskellTypeName ty =
---    case ty of
---        Complex _ attrs (Seq elts) ->
   let recType = bld s.typeName.unHaskellTypeName
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 $ do
@@ -1073,3 +1070,84 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
                  Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
                  Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
 
+lookupHaskellTypeBySchemaType :: XMLString -> Maybe HaskellTypeName
+lookupHaskellTypeBySchemaType = undefined
+
+registerDataDeclaration :: (TyData, [Record]) -> m ()
+registerDataDeclaration = undefined
+
+registerExtractionFunction :: FunctionBody -> m ()
+registerExtractionFunction = undefined
+
+registerParseFunction :: FunctionBody -> m ()
+registerParseFunction = undefined
+
+registerSequenceGI :: Monad m => SequenceGI -> m ()
+registerSequenceGI s = do
+  registerDataDeclaration $ mkSequenceTypeDeclaration s
+  registerExtractionFunction $ generateSequenceExtractFunctionBody s
+  registerParseFunction $ generateSequenceParseFunctionBody s
+
+processComplex ::
+  forall m.
+  (Monad m) =>
+  Bool ->
+  [Attr] ->
+  TyPart ->
+  m HaskellTypeName
+processComplex _mixed attrs inner = case inner of
+  Seq seqParts -> case traverse getElement seqParts of
+    Nothing -> error "only sequence of elements is supported"
+    Just elts -> do
+      sGI <- mkSequenceGI elts
+      registerSequenceGI sGI
+      pure sGI.typeName
+  _ -> error "anything other than Seq inside Complex is not supported"
+  where
+  mkSequenceGI :: [Element] -> m SequenceGI
+  mkSequenceGI elts = do
+    attrFields <- mapM attributeToField attrs
+    fields <- mapM elementToField elts
+    pure SequenceGI
+      { typeName = undefined
+      , consName = undefined
+      , attributes = attrFields
+      , fields
+      }
+  attributeToField :: Attr -> m FieldGI
+  attributeToField attr = do
+    typeName <- processType $ aType attr
+    pure FieldGI
+      { haskellName = attrNameToHaskellFieldName $ aName attr
+      , xmlName = undefined
+      , cardinality = RepMaybe
+      , typeName
+      }
+  elementToField :: Element -> m FieldGI
+  elementToField elt = do
+    typeName <- processType $ eType elt
+    pure FieldGI
+      { haskellName = attrNameToHaskellFieldName $ eName elt
+      , xmlName = eName elt
+      , cardinality = getCardinality elt
+      , typeName
+      }
+  getCardinality elt = case (minOccurs elt, maxOccurs elt) of
+    (1, MaxOccurs 1) -> RepOnce
+    (0, MaxOccurs 1) -> RepMaybe
+    (0, _) -> RepMany
+    _ -> error "unknown cardinality"
+  getElement :: TyPart -> Maybe Element
+  getElement (Elt e) = Just e
+  getElement _ = Nothing
+
+attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
+attrNameToHaskellFieldName = HaskellFieldName
+
+processType :: (Monad m) => Type -> m HaskellTypeName
+processType = \case
+  Ref knownType ->
+    maybe (error "") pure $ lookupHaskellTypeBySchemaType knownType
+  Complex{mixed, attrs, inner} ->
+    processComplex mixed attrs inner
+  _ -> undefined
