@@ -14,6 +14,7 @@
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
 {-# LANGUAGE ViewPatterns               #-}
+{-# LANGUAGE DerivingStrategies #-}
 -- | Monad for code generation:
 --   Mostly deals with keeping track of all
 --   generated code as "Builder",
@@ -30,6 +31,12 @@ module CodeGenMonad(-- Code generation monad
                    ,outCodeLine
                    ,cut
                    ,warn
+                   ,knownTypes
+                   ,typeDecls
+                   ,parseFunctions
+                   ,extractFunctions
+                   ,allocatedHaskellTypes
+                   ,allocatedHaskellConses
 
                    -- Translating identifiers
                    ,TargetIdNS(..)
@@ -48,6 +55,11 @@ module CodeGenMonad(-- Code generation monad
                    ,incIndent
                    ,decIndent
                    ,getIndent
+
+                   ,HaskellFieldName(..)
+                   ,HaskellTypeName(..)
+                   ,HaskellConsName(..)
+                   ,FunctionBody(..)
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -70,11 +82,14 @@ import           BaseTypes
 import           FromXML                  (XMLString)
 import           Identifiers
 import           Schema
+import TypeDecls1
 
 
 -- | To enable tracing import Debug.Trace(trace) instead:
 import qualified Debug.Trace
 import GHC.Stack (HasCallStack, callStack, prettyCallStack)
+import Data.String (IsString)
+import Data.Bifunctor (Bifunctor(..))
 
 trace :: HasCallStack => String -> a -> a
 trace msg = Debug.Trace.trace (msg <> "\n  " <> prettyCallStack callStack)
@@ -96,6 +111,15 @@ data TargetIdNS = TargetTypeName
 
 type IdClass = (XMLIdNS, TargetIdNS)
 
+newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString}
+  deriving newtype (Eq, Ord, Show, IsString)
+newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
+  deriving newtype (Eq, Ord, Show, IsString)
+newtype HaskellConsName = HaskellConsName {unHaskellConsName :: BS.ByteString}
+  deriving newtype (Eq, Ord, Show, IsString)
+
+newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
+
 -- | State of code generator
 data CGState =
   CGState {
@@ -103,6 +127,12 @@ data CGState =
     _translations         :: Map.Map (IdClass,    XMLString) XMLString
     -- | Set of translation target names that were used before (and are thus unavailable.)
   , _allocatedIdentifiers :: Set.Set (TargetIdNS, XMLString)
+  , _allocatedHaskellTypes :: Set.Set HaskellTypeName
+  , _allocatedHaskellConses :: Set.Set HaskellConsName
+  , _knownTypes :: Map.Map XMLString HaskellTypeName
+  , _typeDecls :: [(TyData, [Record])]
+  , _parseFunctions :: [FunctionBody]
+  , _extractFunctions :: [FunctionBody]
 
   -- FOR GENERATING
   , _indent               :: Int
@@ -154,6 +184,12 @@ initialState  = CGState
                (Map.fromList [(((SchemaType, TargetTypeName), schemaType), haskellType)
                              | (schemaType, haskellType) <- baseTranslations ])
                (Set.fromList $ map trans baseTranslations)
+               (Set.fromList $ map (HaskellTypeName . snd) baseTranslations)
+               (Set.fromList $ map (HaskellConsName . snd) baseTranslations)
+               (Map.fromList $ map (second HaskellTypeName) baseTranslations)
+               []
+               []
+               []
                0
   where
     trans = (TargetTypeName,) . snd

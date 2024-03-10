@@ -57,6 +57,8 @@ import Control.Monad.Writer (Writer, MonadWriter (..), execWriter)
 import Control.Monad.Reader
 import Data.Bifunctor (Bifunctor(bimap))
 import qualified Data.List as List
+import qualified Control.Lens as Lens
+import Control.Lens
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -944,13 +946,6 @@ data SequenceGI = SequenceGI
   , fields :: [FieldGI]
   }
 
-newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString}
-  deriving newtype (Eq, Ord, Show, IsString)
-newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
-  deriving newtype (Eq, Ord, Show, IsString)
-newtype HaskellConsName = HaskellConsName {unHaskellConsName :: BS.ByteString}
-  deriving newtype (Eq, Ord, Show, IsString)
-
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
   , xmlName :: XMLString
@@ -986,8 +981,6 @@ exampleSequenceGI = SequenceGI
     , FieldGI "techStops" "techStopsElt" RepMany "TechStop"
     ]
   }
-
-newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
 
 type CodeWriter = ReaderT Int (Writer [String]) ()
 
@@ -1071,53 +1064,54 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
                  Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
                  Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
 
-lookupHaskellTypeBySchemaType :: XMLString -> Maybe HaskellTypeName
-lookupHaskellTypeBySchemaType = undefined
+lookupHaskellTypeBySchemaType :: XMLString -> CG HaskellTypeName
+lookupHaskellTypeBySchemaType xmlType = do
+  knownTypes_ <- Lens.use knownTypes
+  pure $ fromMaybe (error "unknown type") $ Map.lookup xmlType knownTypes_
 
-registerDataDeclaration :: (TyData, [Record]) -> m ()
-registerDataDeclaration = undefined
+registerDataDeclaration :: (TyData, [Record]) -> CG ()
+registerDataDeclaration decl = typeDecls %= (decl :)
 
-registerExtractionFunction :: FunctionBody -> m ()
-registerExtractionFunction = undefined
+registerExtractionFunction :: FunctionBody -> CG ()
+registerExtractionFunction fBody = extractFunctions %= (fBody :)
 
-registerParseFunction :: FunctionBody -> m ()
-registerParseFunction = undefined
+registerParseFunction :: FunctionBody -> CG ()
+registerParseFunction fBody = parseFunctions %= (fBody :)
 
-registerSequenceGI :: Monad m => SequenceGI -> m ()
+registerSequenceGI :: SequenceGI -> CG ()
 registerSequenceGI s = do
   registerDataDeclaration $ mkSequenceTypeDeclaration s
   registerExtractionFunction $ generateSequenceExtractFunctionBody s
   registerParseFunction $ generateSequenceParseFunctionBody s
 
-getAllocatedHaskellTypes :: m (Set.Set HaskellTypeName)
-getAllocatedHaskellTypes = undefined
+getAllocatedHaskellTypes :: CG (Set.Set HaskellTypeName)
+getAllocatedHaskellTypes = Lens.use allocatedHaskellTypes
 
-getAllocatedHaskellConstructors :: m (Set.Set HaskellConsName)
-getAllocatedHaskellConstructors = undefined
+getAllocatedHaskellConstructors :: CG (Set.Set HaskellConsName)
+getAllocatedHaskellConstructors = Lens.use allocatedHaskellConses
 
 getUniqueName :: (Monad m, Ord a) => (XMLString -> a) -> XMLString -> m (Set.Set a) -> m a
 getUniqueName mk possibleName getSet = do
-  set <- getSet
-  pure $ fromJust $ List.find (flip Set.notMember set) possibleAlternatives
+  set_ <- getSet
+  pure $ fromJust $ List.find (flip Set.notMember set_) possibleAlternatives
   where
   possibleAlternatives =
     map mk $
       possibleName : map ((possibleName <>) . cs . show) [1..100::Int]
 
-getUniqueTypeName :: (Monad m) => XMLString -> m HaskellTypeName
-getUniqueTypeName s = getUniqueName HaskellTypeName s getAllocatedHaskellTypes
+getUniqueTypeName :: XMLString -> CG HaskellTypeName
+getUniqueTypeName s =
+  getUniqueName HaskellTypeName s getAllocatedHaskellTypes
 
-getUniqueConsName :: (Monad m) => XMLString -> m HaskellConsName
+getUniqueConsName :: XMLString -> CG HaskellConsName
 getUniqueConsName s = getUniqueName HaskellConsName s getAllocatedHaskellConstructors
 
 processComplex ::
-  forall m.
-  (Monad m) =>
   XMLString -> -- ^ possible name
   Bool ->
   [Attr] ->
   TyPart ->
-  m HaskellTypeName
+  CG HaskellTypeName
 processComplex possibleName _mixed attrs inner = case inner of
   Seq seqParts -> case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
@@ -1127,7 +1121,7 @@ processComplex possibleName _mixed attrs inner = case inner of
       pure sGI.typeName
   _ -> error "anything other than Seq inside Complex is not supported"
   where
-  mkSequenceGI :: [Element] -> m SequenceGI
+  mkSequenceGI :: [Element] -> CG SequenceGI
   mkSequenceGI elts = do
     typeName <- getUniqueTypeName possibleName
     consName <- getUniqueConsName possibleName
@@ -1139,7 +1133,7 @@ processComplex possibleName _mixed attrs inner = case inner of
       , attributes = attrFields
       , fields
       }
-  attributeToField :: Attr -> m FieldGI
+  attributeToField :: Attr -> CG FieldGI
   attributeToField attr = do
     typeName <- processType (aName attr) $ aType attr
     pure FieldGI
@@ -1148,7 +1142,7 @@ processComplex possibleName _mixed attrs inner = case inner of
       , cardinality = RepMaybe
       , typeName
       }
-  elementToField :: Element -> m FieldGI
+  elementToField :: Element -> CG FieldGI
   elementToField elt = do
     typeName <- processType (eName elt) $ eType elt
     pure FieldGI
@@ -1172,18 +1166,18 @@ eltNameToHaskellFieldName = HaskellFieldName
 attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
 attrNameToHaskellFieldName = HaskellFieldName
 
-processType :: (Monad m) => XMLString -> Type -> m HaskellTypeName
+processType :: XMLString -> Type -> CG HaskellTypeName
 processType possibleName = \case
   Ref knownType ->
-    maybe (error "unknown reference") pure $ lookupHaskellTypeBySchemaType knownType
+    lookupHaskellTypeBySchemaType knownType
   Complex{mixed, attrs, inner} ->
     processComplex possibleName mixed attrs inner
   _ -> error "not ref and complex, not supported"
 
-registerNamedType :: XMLString -> HaskellTypeName -> m ()
-registerNamedType = undefined
+registerNamedType :: XMLString -> HaskellTypeName -> CG ()
+registerNamedType xmlName haskellType = knownTypes %= Map.insert xmlName haskellType
 
-processSchemaNamedTypes :: (Monad m) => TypeDict -> m ()
+processSchemaNamedTypes :: TypeDict -> CG ()
 processSchemaNamedTypes dict = forM_ (Map.toList dict) \(tName, tDef) -> do
   haskellTypeName <- processType tName tDef
   registerNamedType tName haskellTypeName
