@@ -1,15 +1,14 @@
-resolver: lts-14.27
+resolver: lts-20.11
 packages:
 - .
-- xeno
-- iso8601-duration
-- haskell-src-match
-- json-autotype/run-haskell-module
-- pugixml
-- weigh
 extra-deps:
+- git: https://gitlab.com/migamake/haskell-src-match
+  commit: b29bc99431b4fdb419c488936e56f7db276f3af5
+- git: /home/yuri/prog/haskell/repos/iso8601-duration
+  commit: 49ee4dd640d1889d6ce6982c464c47023796abb7
 - criterion-1.5.6.2
 - bytestring-mmap-0.2.2@sha256:d04e6bc5a158dd292757d3b9b032beb8a2c43e768777d64a8289abf89f612f67,1282
 - perfect-vector-shuffle-0.1.1.1@sha256:40f555585ec7b56bb329630d63749fc916031f944dd6287dadb844ceeccfddde,3989
 - megaparsec-8.0.0
 allow-newer: true
+system-ghc: true

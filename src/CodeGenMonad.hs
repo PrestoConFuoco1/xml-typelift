@@ -73,9 +73,11 @@ import           Schema
 
 
 -- | To enable tracing import Debug.Trace(trace) instead:
---import Debug.Trace(trace)
-trace :: String -> a -> a
-trace _ x = x
+import qualified Debug.Trace
+import GHC.Stack (HasCallStack, callStack, prettyCallStack)
+
+trace :: HasCallStack => String -> a -> a
+trace msg = Debug.Trace.trace (msg <> "\n  " <> prettyCallStack callStack)
 
 -- | Which of the XML Schema identifier namespaces do we use here
 data XMLIdNS = SchemaType
@@ -204,10 +206,12 @@ classNormalizer TargetFieldName = normalizeFieldName
 
 -- | Translate XML Schema identifier into Haskell identifier,
 --   maintaining dictionary to assure uniqueness of Haskell identifier.
-translate :: IdClass
-          -> XMLString               -- input container name
-          -> XMLString               -- input name
-          -> CG B.Builder -- TODO special variant of monad which only can write to dictionary, but can't output
+translate ::
+  HasCallStack =>
+  IdClass ->
+  XMLString -> -- input container name
+  XMLString ->               -- input name
+  CG B.Builder -- TODO special variant of monad which only can write to dictionary, but can't output
 translate (SchemaGroup, TargetTypeName) container xmlName =
     -- Treated as ordinary schema type name
     translate (SchemaType, TargetTypeName) container xmlName
@@ -215,7 +219,7 @@ translate idClass@(schemaIdClass, haskellIdClass) container xmlName = do
     tr     <- Lens.use translations
     allocs <- Lens.use allocatedIdentifiers
     case Map.lookup (idClass, xmlName) tr of
-      Just r  -> return $ B.byteString r
+      Just r  -> traceTranslate ("resolved to " <> show r) $ return $ B.byteString r
       Nothing -> do
         let isValid (_, x) | rejectInvalidTypeName x = False
             isValid     x  | x `Set.member` allocs   = False
@@ -223,13 +227,14 @@ translate idClass@(schemaIdClass, haskellIdClass) container xmlName = do
             proposals = isValid `filter` proposeTranslations xmlName
         case proposals of
           (goodProposal:_) ->
-           trace ("translate " <> show idClass <> " " <> show container <>
-                  " "          <> show xmlName <> " -> " <> show goodProposal) $ do
+           traceTranslate (show goodProposal) $ do
             _ <- translations         %= Map.insert (idClass, xmlName) (snd goodProposal)
             _ <- allocatedIdentifiers %= Set.insert                         goodProposal
             return $ B.byteString $ snd goodProposal
           [] -> error "Impossible happened when trying to find a new identifier - file a bug!"
   where
+    traceTranslate resultTr = trace ("translate " <> show idClass <> " " <> show container <>
+                  " "          <> show xmlName <> " -> " <> resultTr)
     normalizer = classNormalizer haskellIdClass
     initNormalizer = addPrefix schemaIdClass haskellIdClass . normalizer
     proposeTranslations                     :: XMLString -> [(TargetIdNS, XMLString)]

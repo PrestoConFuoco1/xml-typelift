@@ -78,43 +78,43 @@ class Located (l :: [Symbol]) where
 
 instance Located '[] where
     type Place '[] = Root
-    parseHere = xnode @ "Root" parseHere
+    parseHere = xnode @"Root" parseHere
 
 instance Located '["Root"] where
     type Place '["Root"] = Root
     parseHere = Root
-        <$> xnode @ "Customers" parseHere
-        <*> xnode @ "Orders" parseHere
+        <$> xnode @"Customers" parseHere
+        <*> xnode @"Orders" parseHere
 
 instance Located '["Customers", "Root"] where
     type Place '["Customers", "Root"] = Customers
-    parseHere = Customers <$> many (xnode @ "Customer" parseHere)
+    parseHere = Customers <$> many (xnode @"Customer" parseHere)
 
 instance Located '["Orders", "Root"] where
     type Place '["Orders", "Root"] = Orders
-    parseHere = Orders <$> many (xnode @ "Order" parseHere)
+    parseHere = Orders <$> many (xnode @"Order" parseHere)
 
 
 instance Located '["Customer", "Customers", "Root"] where
     type Place '["Customer", "Customers", "Root"] = CustomerType
     parseHere = CustomerType
         <$> return Nothing
-        <*> xnode @ "CompanyName" text
-        <*> xnode @ "ContactName" text
-        <*> xnode @ "ContactTitle" text
-        <*> xnode @ "Phone" text
-        <*> optional (xnode @ "Fax" text)
-        <*> xnode @ "FullAddress" parseHere
+        <*> xnode @"CompanyName" text
+        <*> xnode @"ContactName" text
+        <*> xnode @"ContactTitle" text
+        <*> xnode @"Phone" text
+        <*> optional (xnode @"Fax" text)
+        <*> xnode @"FullAddress" parseHere
 
 instance Located '["FullAddress", "Customer", "Customers", "Root"] where
     type Place   '["FullAddress", "Customer", "Customers", "Root"] = AddressType
     parseHere = AddressType
         <$> return Nothing
-        <*> xnode @ "Address" text
-        <*> xnode @ "City" text
-        <*> xnode @ "Region" text
-        <*> xnode @ "PostalCode" text
-        <*> xnode @ "Country" text
+        <*> xnode @"Address" text
+        <*> xnode @"City" text
+        <*> xnode @"Region" text
+        <*> xnode @"PostalCode" text
+        <*> xnode @"Country" text
 
 zonedTimeStrM :: (F.MonadFail m, Monad m) => ByteString -> m ZonedTime
 zonedTimeStrM = parseTimeM True defaultTimeLocale fmt . BSC.unpack
@@ -125,25 +125,25 @@ zonedTimeStrM = parseTimeM True defaultTimeLocale fmt . BSC.unpack
 instance Located '["Order", "Orders", "Root"] where
     type Place '["Order", "Orders", "Root"] = OrderType
     parseHere = OrderType
-        <$> xnode @ "CustomerID" text
-        <*> xnode @ "EmployeeID" text
-        <*> xnode @ "OrderDate" (text >>= zonedTimeStrM)
-        <*> xnode @ "RequiredDate" (text >>= zonedTimeStrM)
-        <*> xnode @ "ShipInfo" parseHere
+        <$> xnode @"CustomerID" text
+        <*> xnode @"EmployeeID" text
+        <*> xnode @"OrderDate" (text >>= zonedTimeStrM)
+        <*> xnode @"RequiredDate" (text >>= zonedTimeStrM)
+        <*> xnode @"ShipInfo" parseHere
 
 
 instance Located '["ShipInfo", "Order", "Orders", "Root"] where
     type Place '["ShipInfo", "Order", "Orders", "Root"] = ShipInfoType
     parseHere = ShipInfoType
         <$> return Nothing
-        <*> xnode @ "ShipVia" (read <$> string)
-        <*> xnode @ "Freight" (read <$> string)
-        <*> xnode @ "ShipName" text
-        <*> xnode @ "ShipAddress" text
-        <*> xnode @ "ShipCity" text
-        <*> xnode @ "ShipRegion" text
-        <*> xnode @ "ShipPostalCode" text
-        <*> xnode @ "ShipCountry" text
+        <*> xnode @"ShipVia" (read <$> string)
+        <*> xnode @"Freight" (read <$> string)
+        <*> xnode @"ShipName" text
+        <*> xnode @"ShipAddress" text
+        <*> xnode @"ShipCity" text
+        <*> xnode @"ShipRegion" text
+        <*> xnode @"ShipPostalCode" text
+        <*> xnode @"ShipCountry" text
 
 
 root :: Parser '[] m (Place '[])

@@ -85,14 +85,14 @@ type KnownLocation xs =
     )
 
 locationDepth :: forall l m. KnownLocation l => Parser l m Int
-locationDepth = return $ fromIntegral $ natVal (Proxy @ (Eval (Length l)))
+locationDepth = return $ fromIntegral $ natVal (Proxy @(Eval (Length l)))
 
 locationName :: forall l m. KnownLocation l => Parser l m String
-locationName = return $ symbolVal (Proxy @ (Eval (ToPath l)))
+locationName = return $ symbolVal (Proxy @(Eval (ToPath l)))
 
 
 locDepth :: forall xs m. KnownNat (Len xs) => Parser xs m Int
-locDepth = return . fromIntegral $ natVal (Proxy @ (Len xs))
+locDepth = return . fromIntegral $ natVal (Proxy @(Len xs))
 
 
 -- | drop unused messages we still need to consume to go up a level
@@ -123,7 +123,7 @@ nested attrs act = Parser (\s t ok bad -> unParser act s t { attrs = attrs } ok 
 -- | ensure we have a node s, parse it's attributes and parse internals using provided parser
 xnode :: forall s m l a. (KnownSymbol s) => Parser (s ': l) m a -> Parser l m a
 xnode act = do
-    let tag = C8.pack (symbolVal (Proxy @ s))
+    let tag = C8.pack (symbolVal (Proxy @s))
 
     -- look for opening tag first, fail if it's not, drop formatting
     try $ pillageFormatting >> openingTag >>= guard . (== tag)
@@ -137,7 +137,7 @@ xnode act = do
 
 
 xnode' :: forall s m l a. (KnownSymbol s, KnownLocation l, MonadIO m, Show a) => Parser (s ': l) m a -> Parser l m a
-xnode' act = xnode act <|> (liftIO (print $ "nope with " ++ symbolVal (Proxy @ s)) >> mzero)
+xnode' act = xnode act <|> (liftIO (print $ "nope with " ++ symbolVal (Proxy @s)) >> mzero)
 
 
 string :: Parser s m String

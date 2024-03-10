@@ -17,18 +17,20 @@ module CodeGen(GenerateOpts(..), codegen, parserCodegen) where
 
 import           Prelude                           hiding (id, lookup)
 
+import Data.String.Conversions
 import           Control.Arrow
 import           Control.Monad
 import           Control.Monad                     (forM, forM_, when)
 import qualified Data.ByteString.Builder           as B
 import qualified Data.ByteString.Char8             as BS
+import Text.Pretty.Simple
 import           Data.Default                      as Def
 import qualified Data.Map.Strict                   as Map
 import           Data.Maybe
 import qualified Data.Set                          as Set
 import           Data.String
 import qualified Language.Haskell.TH               as TH
-import           Text.InterpolatedString.Perl6     (qc)
+import           Text.InterpolatedString.Perl6     (qc, ShowQ (..))
 #if !MIN_VERSION_base(4,11,0)
 import           Data.Semigroup((<>))
 #endif
@@ -42,6 +44,11 @@ import           TypeDecls
 import           Errors(parseErrorBs)
 
 import           Data.Generics.Uniplate.Operations
+import qualified Data.Text.Lazy.Encoding as TLE
+import qualified Data.Text.Lazy as TL
+import Control.Exception (evaluate)
+import Debug.Trace (trace)
+import GHC.Stack (HasCallStack)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -54,16 +61,20 @@ data GenerateOpts = GenerateOpts
     , isUnsafe               :: Bool
     } deriving Show
 
+instance ShowQ B.Builder where
+  showQ = TL.unpack . TLE.decodeUtf8 . B.toLazyByteString
 
 instance Def.Default GenerateOpts where
     def = GenerateOpts False False
 
-
 -- | Returns a pair of field name, and type code.
 --   That means that type codes are in ElementName namespace, if described in-place,
 --   or standard SchemaType, if referred inside ComplexType declaration.
-generateElementInstance :: XMLString -- container name
-                        -> Element -> CG TyField
+generateElementInstance ::
+  HasCallStack =>
+  XMLString -> -- container name
+  Element ->
+  CG TyField
 generateElementInstance container elt@(Element {minOccurs, maxOccurs, eName, ..}) =
     (,) <$> (TyFieldName <$> translate (ElementName, TargetFieldName) container eName)
         <*> (TyType  <$> wrapper <$> generateElementType container elt)
@@ -74,8 +85,10 @@ generateElementInstance container elt@(Element {minOccurs, maxOccurs, eName, ..}
 {-generateElementInstance container _ = return ( B.byteString container
                                              , "generateElementInstanceNotFullyImplemented" )-}
 
-generateGroupType :: XMLString -- group name
-                  -> CG TyField
+generateGroupType ::
+  HasCallStack =>
+  XMLString -> -- group name
+  CG TyField
 generateGroupType groupName =
     (,) <$> (TyFieldName <$> trans TargetFieldName)
         <*> (TyType      <$> trans TargetTypeName )
@@ -83,9 +96,11 @@ generateGroupType groupName =
     trans tgt = translate (SchemaGroup, tgt) groupName groupName
 
 -- | Generate type of given <element/>, if not already declared by type="..." attribute reference.
-generateElementType :: XMLString -- container name
-                    -> Element
-                    -> CG B.Builder
+generateElementType ::
+  HasCallStack =>
+  XMLString -> -- container name
+  Element ->
+  CG B.Builder
 -- Flatten elements with known type to their types.
 generateElementType _         (eType -> Ref (""    )) = return "ElementWithEmptyRefType"
 generateElementType container (eType -> Ref (tyName)) =
@@ -117,7 +132,9 @@ escapeSpaces ty@(TyType tyType@(builderString -> tyTypeStr))
 --   generate the type to hold them.
 --   Or if it turns out these are referred types - just return their names.
 --   That means that our container is likely 'SchemaType' namespace
-generateContentType :: XMLString -- container name
+generateContentType ::
+  HasCallStack =>
+  XMLString -- container name
                     -> Type -> CG B.Builder
 generateContentType container (Ref (tyName)) = translate (SchemaType, TargetTypeName) container tyName
   -- TODO: check if the type was already translated (as it should, if it was generated)
@@ -200,7 +217,10 @@ generateContentType eName (Extension   _base  _otherType) = do
     parseErrorBs eName [qc|Can't generate extension "{eName}"|]
 
 
-getExtendedType :: Type -> CG Type
+getExtendedType ::
+  HasCallStack =>
+  Type ->
+  CG Type
 getExtendedType (Extension base cpl@Complex {inner=Seq {}}) = do
   -- TODO resolve right naming of superTyLabel
   superTyLabel <- builderString <$> translate (SchemaType,TargetFieldName) base "Super" -- should be: MetaKey instead of SchemaType
@@ -245,12 +265,17 @@ parserCodegen :: GenerateOpts -> Schema -> IO String
 parserCodegen opts sch = do
     --putStrLn "~~~~~~ Schema: ~~~~~~~~~"
     --pPrint sch
+    --putStrLn "~~~~~~ Schema tops: ~~~~~~~~~"
+    --pPrint (tops sch)
     --putStrLn "~~~~~~~~~~~~~~~~~~~~~~~~"
     codegen' sch (generateParser1 opts sch)
 
 
 -- | Generate content type, and put an type name on it.
-generateNamedContentType :: (XMLString, Type) -> CG ()
+generateNamedContentType ::
+  HasCallStack =>
+  (XMLString, Type) ->
+  CG ()
 generateNamedContentType (name, ty) = do
   contentTypeName <- translate (SchemaType, TargetTypeName) name name
   contentConsName <- translate (SchemaType, TargetConsName) name name
@@ -259,7 +284,11 @@ generateNamedContentType (name, ty) = do
     warn "-- Named base type"
     declareNewtype (TyData contentTypeName) (TyCon contentConsName) (TyType contentTypeCode)
 
-generateSchema :: GenerateOpts -> Schema -> CG ()
+generateSchema ::
+  HasCallStack =>
+  GenerateOpts ->
+  Schema ->
+  CG ()
 generateSchema GenerateOpts{..} sch = do
     unless isUnsafe $ outCodeLine "{-# LANGUAGE Safe #-}"
     outCodeLine "{-# LANGUAGE DuplicateRecordFields #-}"
@@ -311,9 +340,6 @@ uniq  = Set.toList . Set.fromList
 tracer :: String -> p2 -> p2
 --tracer lbl a = trace (lbl <> show a) a
 tracer _ a = a
-
-instance Show B.Builder where
-  show = BS.unpack . builderString
 
 
 -- * ----------------------------------------------------------------------------------------------
@@ -410,6 +436,7 @@ getParserForStandardXsd "xs:gMonth"             = Just "Day"
 getParserForStandardXsd "xs:gYear"              = Just "Day"
 getParserForStandardXsd "xs:boolean"            = Just "Boolean"
 getParserForStandardXsd "xs:anyURI"             = Just "String" -- TODO
+getParserForStandardXsd "xs:any"                = Just "String" -- TODO: what is xs:any? Can it be String?
 getParserForStandardXsd _                       = Nothing
 
 
@@ -658,11 +685,15 @@ generateParserInternalArray GenerateOpts{..} Schema{..} = do
         outCodeLine' [qc|  | otherwise = skipToOpenTag (ofs + 1)|]
 
 
-generateParserExtractTopLevel :: GenerateOpts -> Schema -> CG ()
+generateParserExtractTopLevel ::
+  HasCallStack =>
+  GenerateOpts ->
+  Schema ->
+  CG ()
 generateParserExtractTopLevel GenerateOpts{..} sch@Schema{..} = do
     forM_ tops $ \topEl -> do
         let rootName = eName topEl
-        haskellRootName <- translate (ElementName, TargetTypeName) "" rootName -- TODO container?
+        haskellRootName :: B.Builder <- translate (ElementName, TargetTypeName) "" rootName -- TODO container?
         outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
         outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{haskellRootName}Content 0|]
     withIndent $ do

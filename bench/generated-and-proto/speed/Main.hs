@@ -13,10 +13,10 @@ import Parser1
 #ifdef BENCH_USE_PARSER2
 import Parser2
 #endif
-import Parser3
+-- import Parser3
 import Parser4
 import Parser5
-import Parser6
+-- import Parser6
 import Parser7
 
 

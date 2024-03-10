@@ -26,6 +26,7 @@ ghc-options: -Wall
 dependencies:
   - base >= 4.7 && < 5
   - bytestring
+  - text
   - containers
   - data-default
   - deepseq
@@ -43,6 +44,8 @@ dependencies:
   - temporary
   - uniplate
   - xeno
+  - pretty-simple
+  - string-conversions
 
 flags:
   use-parser2:
