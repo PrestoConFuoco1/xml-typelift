@@ -1113,11 +1113,12 @@ getUniqueConsName s = getUniqueName HaskellConsName s getAllocatedHaskellConstru
 processComplex ::
   forall m.
   (Monad m) =>
+  XMLString -> -- ^ possible name
   Bool ->
   [Attr] ->
   TyPart ->
   m HaskellTypeName
-processComplex _mixed attrs inner = case inner of
+processComplex possibleName _mixed attrs inner = case inner of
   Seq seqParts -> case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
     Just elts -> do
@@ -1128,28 +1129,30 @@ processComplex _mixed attrs inner = case inner of
   where
   mkSequenceGI :: [Element] -> m SequenceGI
   mkSequenceGI elts = do
+    typeName <- getUniqueTypeName possibleName
+    consName <- getUniqueConsName possibleName
     attrFields <- mapM attributeToField attrs
     fields <- mapM elementToField elts
     pure SequenceGI
-      { typeName = undefined
-      , consName = undefined
+      { typeName
+      , consName
       , attributes = attrFields
       , fields
       }
   attributeToField :: Attr -> m FieldGI
   attributeToField attr = do
-    typeName <- processType $ aType attr
+    typeName <- processType (aName attr) $ aType attr
     pure FieldGI
       { haskellName = attrNameToHaskellFieldName $ aName attr
-      , xmlName = undefined
+      , xmlName = aName attr
       , cardinality = RepMaybe
       , typeName
       }
   elementToField :: Element -> m FieldGI
   elementToField elt = do
-    typeName <- processType $ eType elt
+    typeName <- processType (eName elt) $ eType elt
     pure FieldGI
-      { haskellName = attrNameToHaskellFieldName $ eName elt
+      { haskellName = eltNameToHaskellFieldName $ eName elt
       , xmlName = eName elt
       , cardinality = getCardinality elt
       , typeName
@@ -1163,13 +1166,26 @@ processComplex _mixed attrs inner = case inner of
   getElement (Elt e) = Just e
   getElement _ = Nothing
 
+eltNameToHaskellFieldName :: BS.ByteString -> HaskellFieldName
+eltNameToHaskellFieldName = HaskellFieldName
+
 attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
 attrNameToHaskellFieldName = HaskellFieldName
 
-processType :: (Monad m) => Type -> m HaskellTypeName
-processType = \case
+processType :: (Monad m) => XMLString -> Type -> m HaskellTypeName
+processType possibleName = \case
   Ref knownType ->
-    maybe (error "") pure $ lookupHaskellTypeBySchemaType knownType
+    maybe (error "unknown reference") pure $ lookupHaskellTypeBySchemaType knownType
   Complex{mixed, attrs, inner} ->
-    processComplex mixed attrs inner
-  _ -> undefined
+    processComplex possibleName mixed attrs inner
+  _ -> error "not ref and complex, not supported"
+
+registerNamedType :: XMLString -> HaskellTypeName -> m ()
+registerNamedType = undefined
+
+processSchemaNamedTypes :: (Monad m) => TypeDict -> m ()
+processSchemaNamedTypes dict = forM_ (Map.toList dict) \(tName, tDef) -> do
+  haskellTypeName <- processType tName tDef
+  registerNamedType tName haskellTypeName
+
+
