@@ -280,7 +280,10 @@ parserCodegen opts sch = do
     --putStrLn "~~~~~~ Schema tops: ~~~~~~~~~"
     --pPrint (tops sch)
     --putStrLn "~~~~~~~~~~~~~~~~~~~~~~~~"
-    codegen' sch (generateParser1 opts sch >> generateParser2 opts sch)
+    codegen' sch $ do
+      -- generateParser1 opts sch
+      generateParser2 opts sch
+      pure ()
 
 
 -- | Generate content type, and put an type name on it.
@@ -678,7 +681,7 @@ generateParserInternalArray GenerateOpts{..} Schema{tops, types} = do
         outCodeLine' [qc|parseInt = parseString|]
         outCodeLine' [qc|parseInt64 = parseString|]
         outCodeLine' [qc|parseDay = parseString|]
-        outCodeLine' [qc|parseBoolean = parseString|]
+        outCodeLine' [qc|parseBool = parseString|]
         outCodeLine' [qc|skipSpaces ofs|]
         outCodeLine' [qc|  | isSpaceChar (bs `{bsIndex}` ofs) = skipSpaces (ofs + 1)|]
         outCodeLine' [qc|  | otherwise = ofs|]
@@ -830,6 +833,7 @@ generateParserExtractTopLevel GenerateOpts{..} Schema{..} = do
         outCodeLine' [qc|      let (v, ofs') = subextr ofs|]
         outCodeLine' [qc|      in first (v:) $ extractMany' ofs' (len - 1)|]
         outCodeLine' [qc|extractTokenContent = extractStringContent|]
+        outCodeLine' [qc|extractXMLStringContent = extractStringContent|]
         outCodeLine' [qc|extractDateTimeContent :: Int -> (ZonedTime, Int)|]
         outCodeLine' [qc|extractDateTimeContent = extractAndParse zonedTimeStr|]
         outCodeLine' [qc|extractDayContent :: Int -> (Day, Int)|]
@@ -838,14 +842,16 @@ generateParserExtractTopLevel GenerateOpts{..} Schema{..} = do
         outCodeLine' [qc|extractDurationContent = extractAndParse parseDuration|]
         outCodeLine' [qc|extractDecimalContent :: Int -> (Scientific, Int)|]
         outCodeLine' [qc|extractDecimalContent = extractReadInst|]
+        outCodeLine' [qc|extractScientificContent :: Int -> (Scientific, Int)|]
+        outCodeLine' [qc|extractScientificContent = extractReadInst|]
         outCodeLine' [qc|extractIntegerContent :: Int -> (Integer, Int)|]
         outCodeLine' [qc|extractIntegerContent = extractReadInst|]
         outCodeLine' [qc|extractIntContent :: Int -> (Int, Int)|]
         outCodeLine' [qc|extractIntContent = extractReadInst|]
         outCodeLine' [qc|extractInt64Content :: Int -> (Int64, Int)|]
         outCodeLine' [qc|extractInt64Content = extractReadInst|]
-        outCodeLine' [qc|extractBooleanContent :: Int -> (Bool, Int)|]
-        outCodeLine' [qc|extractBooleanContent ofs = first (\case|]
+        outCodeLine' [qc|extractBoolContent :: Int -> (Bool, Int)|]
+        outCodeLine' [qc|extractBoolContent ofs = first (\case|]
         outCodeLine' [qc|    "true" -> True|]
         outCodeLine' [qc|    "1"    -> True|]
         outCodeLine' [qc|    _      -> False|]
@@ -894,8 +900,8 @@ generateParserTop = do
     outCodeLine "parse :: ByteString -> Either String TopLevel" -- TODO
     outCodeLine "parse = fmap extractTopLevel . parseTopLevelToArray"
 
-generateMainFunction :: GenerateOpts -> CG ()
-generateMainFunction GenerateOpts{..} = do
+generateMainFunction :: HasCallStack => GenerateOpts -> CG ()
+generateMainFunction GenerateOpts{..} = trace "main" do
     outCodeLine' [qc|parseAndPrintFiles :: Bool -> [FilePath] -> IO ()|]
     outCodeLine' [qc|parseAndPrintFiles isPrinting filenames =|]
     withIndent $ do
@@ -1177,9 +1183,11 @@ processSchemaNamedTypes dict = forM_ (Map.toList dict) \(tName, tDef) -> do
 
 generateParser2 :: GenerateOpts -> Schema -> CG ()
 generateParser2 opts@GenerateOpts{isGenerateMainFunction} schema = do
+    generateModuleHeading opts
     processSchemaNamedTypes schema.types
     topNames <- forM schema.tops \el -> processType (eName el) (eType el)
     declaredTypes <- Lens.use typeDecls
+    outCodeLine [qc|type TopLevel = {bld $ unHaskellTypeName $ head topNames}|]
     mapM_ declareAlgebraicType declaredTypes
     outCodeLine [qc|-- PARSER --|]
     generateParserInternalStructures
@@ -1206,9 +1214,11 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
     when (length tops /= 1) $ error "Only one element supported on toplevel."
     let topEl = head tops
     -- Generate parser header
-    let topName = eName topEl
-    when (minOccurs topEl /= 1) $ parseErrorBs topName [qc|Wrong minOccurs = {minOccurs topEl}|]
-    when (maxOccurs topEl /= MaxOccurs 1) $ parseErrorBs topName [qc|Wrong maxOccurs = {maxOccurs topEl}|]
+    let topTag = eName topEl
+        topName' = unHaskellTypeName $ mkHaskellTypeName topTag
+        topName = bld topName'
+    when (minOccurs topEl /= 1) $ parseErrorBs topName' [qc|Wrong minOccurs = {minOccurs topEl}|]
+    when (maxOccurs topEl /= MaxOccurs 1) $ parseErrorBs topName' [qc|Wrong maxOccurs = {maxOccurs topEl}|]
     outCodeLine' [qc|parseTopLevelToArray :: ByteString -> Either String TopLevelInternal|]
     outCodeLine' [qc|parseTopLevelToArray bs = Right $ TopLevelInternal bs $ V.create $ do|]
     withIndent $ do
@@ -1221,7 +1231,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
             outCodeLine' [qc|parse{topName} vec = do|]
             withIndent $ do
                 outCodeLine' [qc|{vecWrite} vec (0::Int) (0::Int)|]
-                outCodeLine' [qc|(_, _) <- inOneTag "{topName}" (skipSpaces $ skipHeader $ skipSpaces 0) $ parse{topName}Content 0|]
+                outCodeLine' [qc|(_, _) <- inOneTag "{topTag}" (skipSpaces $ skipHeader $ skipSpaces 0) $ parse{topName}Content 0|]
                 outCodeLine' [qc|return ()|]
                 outCodeLine' [qc|where|]
                 parseFuncs_ <- Lens.use parseFunctions
@@ -1325,19 +1335,20 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|substr bs ofs len = BS.take len $ BS.drop ofs bs -- TODO replace with UNSAFE?|]
         outCodeLine' [qc|--|]
         --outCodeLine' [qc|parseString :: Int -> Int -> ST s (Int, Int)|]
+        outCodeLine' [qc|parseXMLStringContent = parseString|]
         outCodeLine' [qc|parseString arrStart strStart = do|]
         outCodeLine' [qc|  let strEnd = skipToOpenTag strStart|]
         outCodeLine' [qc|  {vecWrite} vec arrStart     strStart|]
         outCodeLine' [qc|  {vecWrite} vec (arrStart+1) (strEnd - strStart)|]
         outCodeLine' [qc|  return (arrStart+2, strEnd)|]
-        outCodeLine' [qc|parseDecimal = parseString|]
-        outCodeLine' [qc|parseDateTime = parseString|]
-        outCodeLine' [qc|parseDuration = parseString|]
-        outCodeLine' [qc|parseInteger = parseString|]
-        outCodeLine' [qc|parseInt = parseString|]
-        outCodeLine' [qc|parseInt64 = parseString|]
-        outCodeLine' [qc|parseDay = parseString|]
-        outCodeLine' [qc|parseBoolean = parseString|]
+        outCodeLine' [qc|parseScientificContent = parseString|]
+        outCodeLine' [qc|parseDateTimeContent = parseString|]
+        outCodeLine' [qc|parseDurationContent = parseString|]
+        outCodeLine' [qc|parseIntegerContent = parseString|]
+        outCodeLine' [qc|parseIntContent = parseString|]
+        outCodeLine' [qc|parseInt64Content = parseString|]
+        outCodeLine' [qc|parseDayContent = parseString|]
+        outCodeLine' [qc|parseBooleanContent = parseString|]
         outCodeLine' [qc|skipSpaces ofs|]
         outCodeLine' [qc|  | isSpaceChar (bs `{bsIndex}` ofs) = skipSpaces (ofs + 1)|]
         outCodeLine' [qc|  | otherwise = ofs|]
@@ -1367,8 +1378,9 @@ generateParserExtractTopLevel1 ::
   CG ()
 generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
     forM_ topTypes $ \topType -> do
+        let topTypeName = bld topType.unHaskellTypeName
         outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
-        outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topType}Content 0|]
+        outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
     withIndent $ do
         outCodeLine' "where"
         extractFuncs_ <- Lens.use extractFunctions
@@ -1395,22 +1407,23 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
         outCodeLine' [qc|      let (v, ofs') = subextr ofs|]
         outCodeLine' [qc|      in first (v:) $ extractMany' ofs' (len - 1)|]
         outCodeLine' [qc|extractTokenContent = extractStringContent|]
+        outCodeLine' [qc|extractXMLStringContent = extractStringContent|]
         outCodeLine' [qc|extractDateTimeContent :: Int -> (ZonedTime, Int)|]
         outCodeLine' [qc|extractDateTimeContent = extractAndParse zonedTimeStr|]
         outCodeLine' [qc|extractDayContent :: Int -> (Day, Int)|]
         outCodeLine' [qc|extractDayContent = extractReadInst|]
         outCodeLine' [qc|extractDurationContent :: Int -> (Duration, Int)|]
         outCodeLine' [qc|extractDurationContent = extractAndParse parseDuration|]
-        outCodeLine' [qc|extractDecimalContent :: Int -> (Scientific, Int)|]
-        outCodeLine' [qc|extractDecimalContent = extractReadInst|]
+        outCodeLine' [qc|extractScientificContent :: Int -> (Scientific, Int)|]
+        outCodeLine' [qc|extractScientificContent = extractReadInst|]
         outCodeLine' [qc|extractIntegerContent :: Int -> (Integer, Int)|]
         outCodeLine' [qc|extractIntegerContent = extractReadInst|]
         outCodeLine' [qc|extractIntContent :: Int -> (Int, Int)|]
         outCodeLine' [qc|extractIntContent = extractReadInst|]
         outCodeLine' [qc|extractInt64Content :: Int -> (Int64, Int)|]
         outCodeLine' [qc|extractInt64Content = extractReadInst|]
-        outCodeLine' [qc|extractBooleanContent :: Int -> (Bool, Int)|]
-        outCodeLine' [qc|extractBooleanContent ofs = first (\case|]
+        outCodeLine' [qc|extractBoolContent :: Int -> (Bool, Int)|]
+        outCodeLine' [qc|extractBoolContent ofs = first (\case|]
         outCodeLine' [qc|    "true" -> True|]
         outCodeLine' [qc|    "1"    -> True|]
         outCodeLine' [qc|    _      -> False|]
@@ -1431,4 +1444,25 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
     index | isUnsafe  = "`V.unsafeIndex`" :: String
           | otherwise = "V.!"
 
+
+generateModuleHeading ::
+  HasCallStack =>
+  GenerateOpts ->
+  CG ()
+generateModuleHeading GenerateOpts{..} = do
+    unless isUnsafe $ outCodeLine "{-# LANGUAGE Safe #-}"
+    outCodeLine "{-# LANGUAGE DuplicateRecordFields #-}"
+    -- TODO add codegen to parser
+    outCodeLine "{-# LANGUAGE OverloadedStrings #-}"
+    outCodeLine "{-# LANGUAGE RankNTypes #-}"
+    outCodeLine "{-# LANGUAGE LambdaCase #-}"
+    outCodeLine "{-# LANGUAGE DeriveGeneric #-}"
+    outCodeLine "{-# LANGUAGE DeriveAnyClass #-}"
+    outCodeLine "{-# LANGUAGE RecordWildCards #-}"
+    outCodeLine "{-# LANGUAGE ScopedTypeVariables #-}"
+    -- TODO also add in parser generator
+    --
+    --
+    outCodeLine "module XMLSchema where"
+    outCodeLine (basePrologue isUnsafe)
 
