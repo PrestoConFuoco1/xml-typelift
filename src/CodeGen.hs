@@ -52,6 +52,7 @@ import qualified Control.Lens as Lens
 import Control.Lens
 import Identifiers (normalizeFieldName, normalizeTypeName)
 import Data.Foldable (for_)
+import TypeDecls1 (TypeDecl (..))
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -137,7 +138,9 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
     processSchemaNamedTypes schema.types
     topNames <- forM schema.tops \el -> processType (eName el) (eType el)
     declaredTypes <- Lens.use typeDecls
-    mapM_ declareAlgebraicType declaredTypes
+    forM_ declaredTypes \case
+      Alg rec -> declareAlgebraicType rec
+      Newtype (t, c, wt) -> declareNewtype t c wt
     when genParser do
       outCodeLine [qc|type TopLevel = {bld $ unHaskellTypeName $ head topNames}|]
       outCodeLine [qc|-- PARSER --|]
@@ -617,8 +620,9 @@ lookupHaskellTypeBySchemaType xmlType = do
   knownTypes_ <- Lens.use knownTypes
   pure $ fromMaybe (error "unknown type") $ Map.lookup xmlType knownTypes_
 
-registerDataDeclaration :: (TyData, [Record]) -> CG ()
+registerDataDeclaration :: TypeDecl -> CG ()
 registerDataDeclaration decl = typeDecls %= (decl :)
+
 
 registerExtractionFunction :: FunctionBody -> CG ()
 registerExtractionFunction fBody = extractFunctions %= (fBody :)
@@ -628,17 +632,9 @@ registerParseFunction fBody = parseFunctions %= (fBody :)
 
 registerSequenceGI :: SequenceGI -> CG ()
 registerSequenceGI s = do
-  registerDataDeclaration $ mkSequenceTypeDeclaration s
+  registerDataDeclaration $ Alg $ mkSequenceTypeDeclaration s
   registerExtractionFunction $ generateSequenceExtractFunctionBody s
   registerParseFunction $ generateSequenceParseFunctionBody s
-
-registerEnumGI :: EnumGI -> CG ()
-registerEnumGI e = do
-  registerDataDeclaration $ mkEnumTypeDeclaration e
-  registerExtractionFunction $ generateEnumExtractFunc e
-  registerParseFunction $ generateEnumParseFunc e
-
-
 
 getAllocatedHaskellTypes :: CG (Set.Set HaskellTypeName)
 getAllocatedHaskellTypes = Lens.use allocatedHaskellTypes
@@ -723,7 +719,7 @@ processType (normalizeTypeName -> possibleName) = \case
     lookupHaskellTypeBySchemaType knownType
   Complex{mixed, attrs, inner} ->
     processComplex possibleName mixed attrs inner
-  Restriction{restricted} -> case restricted of
+  Restriction{base, restricted} -> case restricted of
     Enum alts -> do
       typeName <- getUniqueTypeName possibleName
       constrs <- forM alts \alt -> (alt,) <$> getUniqueConsName alt
@@ -731,7 +727,14 @@ processType (normalizeTypeName -> possibleName) = \case
         enum_ = EnumGI {typeName, constrs}
       registerEnumGI enum_
       pure typeName
-    _ -> error "not enum, not supported"
+    Pattern{} -> do
+      typeName <- getUniqueTypeName possibleName
+      consName <- getUniqueConsName possibleName
+      wrappedType <- lookupHaskellTypeBySchemaType base
+      let ngi = NewtypeGI {typeName, consName, wrappedType}
+      registerNewtypeGI ngi
+      pure typeName
+    _ -> error "not enum or pattern, not supported"
   _ -> error "not ref and complex, not supported"
 
 data EnumGI = EnumGI
@@ -745,11 +748,39 @@ mkEnumTypeDeclaration en =
   , (\con -> (TyCon $ B.byteString (snd con).unHaskellConsName, [])) <$> en.constrs
   )
 
+data NewtypeGI = NewtypeGI
+  { typeName :: HaskellTypeName
+  , consName :: HaskellConsName
+  , wrappedType :: HaskellTypeName
+  }
+ 
+mkNewtypeDeclaration :: NewtypeGI -> (TyData, TyCon, TyType)
+mkNewtypeDeclaration ngi =
+  ( TyData $ B.byteString ngi.typeName.unHaskellTypeName
+  , TyCon $ B.byteString ngi.consName.unHaskellConsName
+  , TyType $ B.byteString ngi.wrappedType.unHaskellTypeName
+  )
+
+generateNewtypeParseFunc :: NewtypeGI -> FunctionBody
+generateNewtypeParseFunc ngi = FunctionBody $ runCodeWriter do
+  out1 (getParserNameForType ngi.typeName <> " arrStart strStart =")
+  withIndent1 do
+   out1 [qc|parseString arrStart strStart|]
+
 generateEnumParseFunc :: EnumGI -> FunctionBody
 generateEnumParseFunc en = FunctionBody $ runCodeWriter do
   out1 (getParserNameForType en.typeName <> " arrStart strStart =")
   withIndent1 do
    out1 [qc|parseString arrStart strStart|]
+
+generateNewtypeExtractFunc :: NewtypeGI -> FunctionBody
+generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
+  let typeName = bld ngi.typeName.unHaskellTypeName
+      consName = bld ngi.consName.unHaskellConsName
+      wrappedName = bld ngi.wrappedType.unHaskellTypeName
+  out1 [qc|extract{typeName}Content ofs =|]
+  withIndent1 do
+    out1 [qc|first {consName} $ extract{wrappedName}Content ofs|]
 
 generateEnumExtractFunc :: EnumGI -> FunctionBody
 generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
@@ -761,6 +792,20 @@ generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
       let conBld = bld haskellCon.unHaskellConsName
       out1 [qc|"{bld xmlName}" -> {conBld}|]
     out1 [qc|) $ extractStringContent ofs|]
+
+registerEnumGI :: EnumGI -> CG ()
+registerEnumGI e = do
+  registerDataDeclaration $ Alg $ mkEnumTypeDeclaration e
+  registerExtractionFunction $ generateEnumExtractFunc e
+  registerParseFunction $ generateEnumParseFunc e
+
+registerNewtypeGI :: NewtypeGI -> CG ()
+registerNewtypeGI ngi = do
+  registerDataDeclaration $ Newtype $ mkNewtypeDeclaration ngi
+  registerExtractionFunction $ generateNewtypeExtractFunc ngi
+  registerParseFunction $ generateNewtypeParseFunc ngi
+
+ 
 
 registerNamedType :: XMLString -> HaskellTypeName -> CG ()
 registerNamedType xmlName haskellType = knownTypes %= Map.insert xmlName haskellType

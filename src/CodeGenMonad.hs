@@ -134,7 +134,7 @@ data CGState =
     _allocatedHaskellTypes :: Set.Set HaskellTypeName
   , _allocatedHaskellConses :: Set.Set HaskellConsName
   , _knownTypes :: Map.Map XMLString HaskellTypeName
-  , _typeDecls :: [(TyData, [Record])]
+  , _typeDecls :: [TypeDecl]
   , _parseFunctions :: [FunctionBody]
   , _extractFunctions :: [FunctionBody]
 

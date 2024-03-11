@@ -81,7 +81,6 @@ formatRecord (name, fields) = do
         return  (thFieldName, noBang, thFieldType)
     return (RecC recName recFields)
 
-
 -- | Declare sum type *without* field names.
 declareSumType :: SumType
                -> CG ()
