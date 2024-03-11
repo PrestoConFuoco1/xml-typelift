@@ -12,7 +12,6 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
-{-# LANGUAGE TypeSynonymInstances       #-}
 {-# LANGUAGE ViewPatterns               #-}
 {-# LANGUAGE DerivingStrategies #-}
 -- | Monad for code generation:
@@ -41,7 +40,6 @@ module CodeGenMonad(-- Code generation monad
                    -- Translating identifiers
                    ,TargetIdNS(..)
                    ,XMLIdNS   (..)
-                   ,translate
                    ,getTypeFromSchema
 
                    -- Utilities
@@ -133,11 +131,7 @@ newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
 -- | State of code generator
 data CGState =
   CGState {
-    -- | Translation of XML Schema identifiers to Haskell identifiers.
-    _translations         :: Map.Map (IdClass,    XMLString) XMLString
-    -- | Set of translation target names that were used before (and are thus unavailable.)
-  , _allocatedIdentifiers :: Set.Set (TargetIdNS, XMLString)
-  , _allocatedHaskellTypes :: Set.Set HaskellTypeName
+    _allocatedHaskellTypes :: Set.Set HaskellTypeName
   , _allocatedHaskellConses :: Set.Set HaskellConsName
   , _knownTypes :: Map.Map XMLString HaskellTypeName
   , _typeDecls :: [(TyData, [Record])]
@@ -191,9 +185,6 @@ instance MonadFail CG where
 
 initialState :: CGState
 initialState  = CGState
-               (Map.fromList [(((SchemaType, TargetTypeName), schemaType), haskellType)
-                             | (schemaType, haskellType) <- baseTranslations ])
-               (Set.fromList $ map trans baseTranslations)
                (Set.fromList $ map (HaskellTypeName . snd) baseTranslations)
                (Set.fromList $ map (HaskellConsName . snd) baseTranslations)
                (Map.fromList $ map (second HaskellTypeName) baseTranslations)
@@ -201,10 +192,8 @@ initialState  = CGState
                []
                []
                0
-  where
-    trans = (TargetTypeName,) . snd
 
-out :: (TH.Q TH.Dec) -> CG ()
+out :: TH.Q TH.Dec -> CG ()
 out dec = RWS.tell [CGDec dec]
 
 out' :: TH.DecsQ -> CG ()
@@ -224,72 +213,6 @@ bshow = BS.pack . show
 builderUnlines :: [B.Builder] -> B.Builder
 builderUnlines []     = ""
 builderUnlines (l:ls) = l <> mconcat (("\n" <>) <$> ls)
-
--- | PlaceHolder depending of class of the source and target ids
---   Names selected to provide maximum clarity.
-placeholder :: XMLIdNS -> TargetIdNS -> XMLString
-placeholder xmlIdClass targetIdClass = classNormalizer targetIdClass $ name xmlIdClass
-  where
-    name  SchemaType    = "UnnamedSchemaType"
-    name  SchemaGroup   = "UnnamedGroupType"
-    name  ElementName   = "UnnamedElement"    -- is not allowed by schema
-    name  AttributeName = "UnnamedAttribute"
-    name (EnumIn x)     = "EnumIn" <> x
-    name (ChoiceIn x)   = "ChoiceIn" <> x
-
-
-addPrefix :: XMLIdNS -> TargetIdNS -> XMLString -> XMLString
-addPrefix (ChoiceIn {}) TargetTypeName  = Prelude.id
-addPrefix (ChoiceIn cn) TargetConsName  = ((normalizeTypeName cn) <> ) . normalizeTypeName
-addPrefix (ChoiceIn {}) TargetFieldName = error "addPrefix (ChoiceIn {}) TargetFieldName :: Unsupported"
-addPrefix _             _  = Prelude.id
-
-
-classNormalizer :: TargetIdNS -> XMLString -> XMLString
-classNormalizer TargetTypeName  = normalizeTypeName
-classNormalizer TargetConsName  = normalizeTypeName -- same normalization as type names, but separate space
-classNormalizer TargetFieldName = normalizeFieldName
-
--- | Translate XML Schema identifier into Haskell identifier,
---   maintaining dictionary to assure uniqueness of Haskell identifier.
-translate ::
-  HasCallStack =>
-  IdClass ->
-  XMLString -> -- input container name
-  XMLString ->               -- input name
-  CG B.Builder -- TODO special variant of monad which only can write to dictionary, but can't output
-translate (SchemaGroup, TargetTypeName) container xmlName =
-    -- Treated as ordinary schema type name
-    translate (SchemaType, TargetTypeName) container xmlName
-translate idClass@(schemaIdClass, haskellIdClass) container xmlName = do
-    tr     <- Lens.use translations
-    allocs <- Lens.use allocatedIdentifiers
-    case Map.lookup (idClass, xmlName) tr of
-      Just r  -> traceTranslate ("resolved to " <> show r) $ return $ B.byteString r
-      Nothing -> do
-        let isValid (_, x) | rejectInvalidTypeName x = False
-            isValid     x  | x `Set.member` allocs   = False
-            isValid  _     = True
-            proposals = isValid `filter` proposeTranslations xmlName
-        case proposals of
-          (goodProposal:_) ->
-           traceTranslate (show goodProposal) $ do
-            _ <- translations         %= Map.insert (idClass, xmlName) (snd goodProposal)
-            _ <- allocatedIdentifiers %= Set.insert                         goodProposal
-            return $ B.byteString $ snd goodProposal
-          [] -> error "Impossible happened when trying to find a new identifier - file a bug!"
-  where
-    traceTranslate resultTr = trace ("translate " <> show idClass <> " " <> show container <>
-                  " "          <> show xmlName <> " -> " <> resultTr)
-    normalizer = classNormalizer haskellIdClass
-    initNormalizer = addPrefix schemaIdClass haskellIdClass . normalizer
-    proposeTranslations                     :: XMLString -> [(TargetIdNS, XMLString)]
-    proposeTranslations (initNormalizer -> name) = ((haskellIdClass,) . normalizer) <$>
-        ([BS.take i container <> normName | i :: Int <- [0..BS.length container]] <> -- TODO use here `BS.inits`
-         [normName <> bshow i | i :: Int <- [1..]])
-      where
-        normName | name==""  = placeholder schemaIdClass haskellIdClass
-                 | otherwise = name
 
 
 getTypeFromSchema :: XMLString -> CG (Maybe Type)
