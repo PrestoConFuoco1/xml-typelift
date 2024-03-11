@@ -51,6 +51,7 @@ import qualified Data.List as List
 import qualified Control.Lens as Lens
 import Control.Lens
 import Identifiers (normalizeFieldName, normalizeTypeName)
+import Data.Foldable (for_)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -576,7 +577,6 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
     out1 [qc|pure ({arrRet}, {strRet})|]
 
 
-
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
   let recType = bld s.typeName.unHaskellTypeName
@@ -631,6 +631,14 @@ registerSequenceGI s = do
   registerDataDeclaration $ mkSequenceTypeDeclaration s
   registerExtractionFunction $ generateSequenceExtractFunctionBody s
   registerParseFunction $ generateSequenceParseFunctionBody s
+
+registerEnumGI :: EnumGI -> CG ()
+registerEnumGI e = do
+  registerDataDeclaration $ mkEnumTypeDeclaration e
+  registerExtractionFunction $ generateEnumExtractFunc e
+  registerParseFunction $ generateEnumParseFunc e
+
+
 
 getAllocatedHaskellTypes :: CG (Set.Set HaskellTypeName)
 getAllocatedHaskellTypes = Lens.use allocatedHaskellTypes
@@ -715,7 +723,44 @@ processType (normalizeTypeName -> possibleName) = \case
     lookupHaskellTypeBySchemaType knownType
   Complex{mixed, attrs, inner} ->
     processComplex possibleName mixed attrs inner
+  Restriction{restricted} -> case restricted of
+    Enum alts -> do
+      typeName <- getUniqueTypeName possibleName
+      constrs <- forM alts \alt -> (alt,) <$> getUniqueConsName alt
+      let
+        enum_ = EnumGI {typeName, constrs}
+      registerEnumGI enum_
+      pure typeName
+    _ -> error "not enum, not supported"
   _ -> error "not ref and complex, not supported"
+
+data EnumGI = EnumGI
+  { typeName :: HaskellTypeName
+  , constrs :: [(XMLString, HaskellConsName)]
+  }
+
+mkEnumTypeDeclaration :: EnumGI -> (TyData, [Record])
+mkEnumTypeDeclaration en =
+  (TyData $ B.byteString en.typeName.unHaskellTypeName
+  , (\con -> (TyCon $ B.byteString (snd con).unHaskellConsName, [])) <$> en.constrs
+  )
+
+generateEnumParseFunc :: EnumGI -> FunctionBody
+generateEnumParseFunc en = FunctionBody $ runCodeWriter do
+  out1 (getParserNameForType en.typeName <> " arrStart strStart =")
+  withIndent1 do
+   out1 [qc|parseString arrStart strStart|]
+
+generateEnumExtractFunc :: EnumGI -> FunctionBody
+generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
+  let recType = bld en.typeName.unHaskellTypeName
+  out1 [qc|extract{recType}Content ofs =|]
+  withIndent1 do
+    out1 [qc|first (\case|]
+    for_ en.constrs \(xmlName, haskellCon) -> do
+      let conBld = bld haskellCon.unHaskellConsName
+      out1 [qc|"{bld xmlName}" -> {conBld}|]
+    out1 [qc|) $ extractStringContent ofs|]
 
 registerNamedType :: XMLString -> HaskellTypeName -> CG ()
 registerNamedType xmlName haskellType = knownTypes %= Map.insert xmlName haskellType
