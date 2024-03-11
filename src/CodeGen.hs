@@ -60,6 +60,7 @@ import qualified Data.List as List
 import qualified Control.Lens as Lens
 import Control.Lens
 import Data.Foldable (for_)
+import Identifiers (normalizeFieldName, normalizeTypeName)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -395,9 +396,9 @@ generateParser1 opts@GenerateOpts{..} schema = do
     outCodeLine "-- parser --"
     outCodeLine ""
     outCodeLine ""
-    generateParserTop schema
-    generateAuxiliaryFunctions schema
-    when isGenerateMainFunction $ generateMainFunction opts schema
+    generateParserTop
+    generateAuxiliaryFunctions
+    when isGenerateMainFunction $ generateMainFunction opts
 
 
 generateParserInternalStructures :: CG ()
@@ -866,8 +867,8 @@ generateParserExtractTopLevel GenerateOpts{..} Schema{..} = do
           | otherwise = "V.!"
 
 
-generateAuxiliaryFunctions :: Schema -> CG ()
-generateAuxiliaryFunctions _schema = do
+generateAuxiliaryFunctions :: CG ()
+generateAuxiliaryFunctions = do
     outCodeLine' ""
     outCodeLine' ""
     outCodeLine' [qc|zonedTimeStr :: ByteString -> Either String ZonedTime|]
@@ -888,13 +889,13 @@ generateAuxiliaryFunctions _schema = do
     outCodeLine' ""
 
 
-generateParserTop :: Schema -> CG ()
-generateParserTop _schema = do
+generateParserTop :: CG ()
+generateParserTop = do
     outCodeLine "parse :: ByteString -> Either String TopLevel" -- TODO
     outCodeLine "parse = fmap extractTopLevel . parseTopLevelToArray"
 
-generateMainFunction :: GenerateOpts -> Schema -> CG ()
-generateMainFunction GenerateOpts{..} _schema = do
+generateMainFunction :: GenerateOpts -> CG ()
+generateMainFunction GenerateOpts{..} = do
     outCodeLine' [qc|parseAndPrintFiles :: Bool -> [FilePath] -> IO ()|]
     outCodeLine' [qc|parseAndPrintFiles isPrinting filenames =|]
     withIndent $ do
@@ -929,14 +930,6 @@ generateMainFunction GenerateOpts{..} _schema = do
             outCodeLine' [qc|([], filenames) -> parseAndPrintFiles False filenames|]
             outCodeLine' [qc|(_,  filenames) -> parseAndPrintFiles True  filenames|]
         outCodeLine' "exitSuccess"
-
-data TypeInterface = TypeInterface
-  { typeConsName :: XMLString
-  }
-
-data TypeProcessingResult = TypeProcessingResult
-  { 
-  }
 
 -- GI stands for "generating input"
 -- type for processing sequence inside complexType
@@ -1102,10 +1095,10 @@ getUniqueName mk possibleName getSet = do
 
 getUniqueTypeName :: XMLString -> CG HaskellTypeName
 getUniqueTypeName s =
-  getUniqueName HaskellTypeName s getAllocatedHaskellTypes
+  getUniqueName mkHaskellTypeName s getAllocatedHaskellTypes
 
 getUniqueConsName :: XMLString -> CG HaskellConsName
-getUniqueConsName s = getUniqueName HaskellConsName s getAllocatedHaskellConstructors
+getUniqueConsName s = getUniqueName mkHaskellConsName s getAllocatedHaskellConstructors
 
 processComplex ::
   XMLString -> -- ^ possible name
@@ -1113,7 +1106,7 @@ processComplex ::
   [Attr] ->
   TyPart ->
   CG HaskellTypeName
-processComplex possibleName _mixed attrs inner = case inner of
+processComplex (normalizeTypeName -> possibleName) _mixed attrs inner = case inner of
   Seq seqParts -> case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
     Just elts -> do
@@ -1161,13 +1154,13 @@ processComplex possibleName _mixed attrs inner = case inner of
   getElement _ = Nothing
 
 eltNameToHaskellFieldName :: BS.ByteString -> HaskellFieldName
-eltNameToHaskellFieldName = HaskellFieldName
+eltNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 
 attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
-attrNameToHaskellFieldName = HaskellFieldName
+attrNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 
 processType :: XMLString -> Type -> CG HaskellTypeName
-processType possibleName = \case
+processType (normalizeTypeName -> possibleName) = \case
   Ref knownType ->
     lookupHaskellTypeBySchemaType knownType
   Complex{mixed, attrs, inner} ->
@@ -1188,10 +1181,6 @@ generateParser2 opts@GenerateOpts{isGenerateMainFunction} schema = do
     topNames <- forM schema.tops \el -> processType (eName el) (eType el)
     declaredTypes <- Lens.use typeDecls
     mapM_ declareAlgebraicType declaredTypes
-    parseFuncs_ <- Lens.use parseFunctions
-    -- mapM_ generateFunction parseFuncs_
-    extractFuncs_ <- Lens.use extractFunctions
-    -- mapM_ generateFunction extractFuncs_
     outCodeLine [qc|-- PARSER --|]
     generateParserInternalStructures
     generateParserInternalArray1 opts schema
@@ -1206,30 +1195,9 @@ generateParser2 opts@GenerateOpts{isGenerateMainFunction} schema = do
     outCodeLine "-- parser --"
     outCodeLine ""
     outCodeLine ""
-    generateParserTop schema
-    generateAuxiliaryFunctions schema
-    when isGenerateMainFunction $ generateMainFunction opts schema
-
-{-
-    generateSchema opts schema
-    outCodeLine [qc|-- PARSER --|]
-    generateParserInternalStructures schema
-    generateParserInternalArray opts schema
-    outCodeLine ""
-    outCodeLine ""
-    outCodeLine "-- extr --"
-    outCodeLine ""
-    outCodeLine ""
-    generateParserExtractTopLevel opts schema
-    outCodeLine ""
-    outCodeLine ""
-    outCodeLine "-- parser --"
-    outCodeLine ""
-    outCodeLine ""
-    generateParserTop schema
-    generateAuxiliaryFunctions schema
-    when isGenerateMainFunction $ generateMainFunction opts schema
--}
+    generateParserTop
+    generateAuxiliaryFunctions
+    when isGenerateMainFunction $ generateMainFunction opts
 
 generateParserInternalArray1 :: GenerateOpts -> Schema -> CG ()
 generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do

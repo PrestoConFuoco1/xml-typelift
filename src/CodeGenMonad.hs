@@ -57,8 +57,12 @@ module CodeGenMonad(-- Code generation monad
                    ,getIndent
 
                    ,HaskellFieldName(..)
-                   ,HaskellTypeName(..)
-                   ,HaskellConsName(..)
+                   ,HaskellTypeName
+                   ,unHaskellTypeName
+                   ,mkHaskellTypeName
+                   ,HaskellConsName
+                   ,unHaskellConsName
+                   ,mkHaskellConsName
                    ,FunctionBody(..)
                    ) where
 
@@ -115,8 +119,14 @@ newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString
   deriving newtype (Eq, Ord, Show, IsString)
 newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
   deriving newtype (Eq, Ord, Show, IsString)
+mkHaskellTypeName :: XMLString -> HaskellTypeName
+mkHaskellTypeName = HaskellTypeName . normalizeTypeName
+
 newtype HaskellConsName = HaskellConsName {unHaskellConsName :: BS.ByteString}
   deriving newtype (Eq, Ord, Show, IsString)
+
+mkHaskellConsName :: BS.ByteString -> HaskellConsName
+mkHaskellConsName = HaskellConsName . normalizeTypeName
 
 newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
 
