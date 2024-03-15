@@ -52,7 +52,7 @@ import qualified Control.Lens as Lens
 import Control.Lens
 import Identifiers (normalizeFieldName, normalizeTypeName)
 import Data.Foldable (for_)
-import TypeDecls1 (TypeDecl (..))
+import TypeDecls1 (TypeDecl (..), SumType)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -141,6 +141,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
     forM_ declaredTypes \case
       Alg rec -> declareAlgebraicType rec
       Newtype (t, c, wt) -> declareNewtype t c wt
+      Sumtype sumtype -> declareSumType sumtype
     when genParser do
       outCodeLine [qc|type TopLevel = {bld $ unHaskellTypeName $ head topNames}|]
       outCodeLine [qc|-- PARSER --|]
@@ -498,6 +499,18 @@ data SequenceGI = SequenceGI
   , fields :: [FieldGI]
   }
 
+data ChoiceGI = ChoiceGI
+  { typeName :: HaskellTypeName
+  , alts :: [(XMLString, HaskellConsName, HaskellTypeName)]
+  }
+
+mkChoiceTypeDeclaration :: ChoiceGI -> SumType
+mkChoiceTypeDeclaration ch =
+  ( TyData $ bld ch.typeName.unHaskellTypeName
+  , flip map ch.alts \(_eltName, cons_, conType) -> do
+    (TyCon $ bld cons_.unHaskellConsName, TyType $ bld conType.unHaskellTypeName)
+  )
+
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
   , xmlName :: XMLString
@@ -534,7 +547,8 @@ exampleSequenceGI = SequenceGI
     ]
   }
 
-type CodeWriter = ReaderT Int (Writer [String]) ()
+type CodeWriter' = ReaderT Int (Writer [String])
+type CodeWriter = CodeWriter' ()
 
 runCodeWriter :: CodeWriter -> [String]
 runCodeWriter action = execWriter $ runReaderT action 0
@@ -579,6 +593,28 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
       out1 [qc|({arrOfs'}, {strOfs'}) <- {tagQuantifier} "{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
     out1 [qc|pure ({arrRet}, {strRet})|]
 
+generateChoiceParseFunctionBody :: ChoiceGI -> FunctionBody
+generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
+  out1 (getParserNameForType ch.typeName <> " arrStart strStart = do") >> withIndent1 do
+    out1 [qc|let tagName = getTagName strStart|]
+    out1 [qc|case tagName of|]
+    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((altTag, _cons, type_), altIdx) -> do
+      let altParser = getParserNameForType type_
+          vecWrite {- | isUnsafe -} = "V.unsafeWrite" :: B.Builder
+      out1 [qc|"{altTag}" -> {vecWrite} vec arrStart {altIdx} >> inOneTag "{altTag}" strStart ({altParser} $ arrStart + 1)|]
+
+generateChoiceExtractFunctionBody :: ChoiceGI -> FunctionBody
+generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
+  let chName = bld ch.typeName.unHaskellTypeName
+  out1 [qc|extract{chName}Content ofs = do|]
+  withIndent1 do
+    let vecIndex = "`V.unsafeIndex`" :: String
+    out1 [qc|let altIdx = arr {vecIndex} ofs|]
+    out1 [qc|case altIdx of|]
+    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((_altTag, cons_, type_), altIdx) -> do
+      let consBld = bld cons_.unHaskellConsName
+          typeBld = bld type_.unHaskellTypeName
+      out1 [qc|{altIdx} -> first {consBld} $ extract{typeBld}Content (ofs + 1)|]
 
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
@@ -636,6 +672,12 @@ registerSequenceGI s = do
   registerExtractionFunction $ generateSequenceExtractFunctionBody s
   registerParseFunction $ generateSequenceParseFunctionBody s
 
+registerChoiceGI :: ChoiceGI -> CG ()
+registerChoiceGI chGI = do
+  registerDataDeclaration $ Sumtype $ mkChoiceTypeDeclaration chGI
+  registerParseFunction $ generateChoiceParseFunctionBody chGI
+  registerExtractionFunction $ generateChoiceExtractFunctionBody chGI
+
 getAllocatedHaskellTypes :: CG (Set.Set HaskellTypeName)
 getAllocatedHaskellTypes = Lens.use allocatedHaskellTypes
 
@@ -671,8 +713,22 @@ processComplex (normalizeTypeName -> possibleName) _mixed attrs inner = case inn
       sGI <- mkSequenceGI elts
       registerSequenceGI sGI
       pure sGI.typeName
+  Choice choiceAlts -> case traverse getElement choiceAlts of
+    Nothing -> error "only choice between elements is supported"
+    Just elts -> do
+      chGI <- mkChoiceGI elts
+      registerChoiceGI chGI
+      pure chGI.typeName
   _ -> error "anything other than Seq inside Complex is not supported"
   where
+  mkChoiceGI :: [Element] -> CG ChoiceGI
+  mkChoiceGI elts = do
+    typeName <- getUniqueTypeName possibleName
+    alts <- forM elts \el -> do
+      altType <- processType (eName el) (eType el)
+      consName <- getUniqueConsName $ possibleName <> normalizeTypeName (eName el)
+      pure (eName el, consName, altType)
+    pure ChoiceGI {typeName, alts}
   mkSequenceGI :: [Element] -> CG SequenceGI
   mkSequenceGI elts = do
     typeName <- getUniqueTypeName possibleName

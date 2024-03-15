@@ -34,5 +34,6 @@ type SumAlt = (TyCon -- ^ Constructor name
 data TypeDecl
   = Alg (TyData, [Record])
   | Newtype (TyData, TyCon, TyType)
+  | Sumtype SumType
 
 
