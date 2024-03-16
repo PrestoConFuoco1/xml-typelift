@@ -62,6 +62,9 @@ module CodeGenMonad(-- Code generation monad
                    ,unHaskellConsName
                    ,mkHaskellConsName
                    ,FunctionBody(..)
+                   ,TypeWithAttrs(..)
+                   ,AttributesInfo(..)
+                   ,typeNoAttrs
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -92,6 +95,7 @@ import qualified Debug.Trace
 import GHC.Stack (HasCallStack, callStack, prettyCallStack)
 import Data.String (IsString)
 import Data.Bifunctor (Bifunctor(..))
+import qualified Data.List.NonEmpty as NE
 
 trace :: HasCallStack => String -> a -> a
 trace msg = Debug.Trace.trace (msg <> "\n  " <> prettyCallStack callStack)
@@ -128,12 +132,27 @@ mkHaskellConsName = HaskellConsName . normalizeTypeName
 
 newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
 
+data TypeWithAttrs = TypeWithAttrs
+  { type_ :: HaskellTypeName
+  , attrs :: AttributesInfo
+  }
+
+
+data AttributesInfo
+  = NoAttrs
+  | AttributesInfo
+    { attrs :: NE.NonEmpty XMLString
+    }
+
+typeNoAttrs :: HaskellTypeName -> TypeWithAttrs
+typeNoAttrs t = TypeWithAttrs t NoAttrs
+
 -- | State of code generator
 data CGState =
   CGState {
     _allocatedHaskellTypes :: Set.Set HaskellTypeName
   , _allocatedHaskellConses :: Set.Set HaskellConsName
-  , _knownTypes :: Map.Map XMLString HaskellTypeName
+  , _knownTypes :: Map.Map XMLString TypeWithAttrs
   , _typeDecls :: [TypeDecl]
   , _parseFunctions :: [FunctionBody]
   , _extractFunctions :: [FunctionBody]
@@ -187,7 +206,7 @@ initialState :: CGState
 initialState  = CGState
                (Set.fromList $ map (HaskellTypeName . snd) baseTranslations)
                (Set.fromList $ map (HaskellConsName . snd) baseTranslations)
-               (Map.fromList $ map (second HaskellTypeName) baseTranslations)
+               (Map.fromList $ map (second $ typeNoAttrs . HaskellTypeName) baseTranslations)
                []
                []
                []

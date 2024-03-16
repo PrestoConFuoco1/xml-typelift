@@ -53,6 +53,7 @@ import Control.Lens
 import Identifiers (normalizeFieldName, normalizeTypeName)
 import Data.Foldable (for_)
 import TypeDecls1 (TypeDecl (..), SumType)
+import qualified Data.List.NonEmpty as NE
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -143,7 +144,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
       Newtype (t, c, wt) -> declareNewtype t c wt
       Sumtype sumtype -> declareSumType sumtype
     when genParser do
-      outCodeLine [qc|type TopLevel = {bld $ unHaskellTypeName $ head topNames}|]
+      outCodeLine [qc|type TopLevel = {bld $ unHaskellTypeName $ type_ $ head topNames}|]
       outCodeLine [qc|-- PARSER --|]
       generateParserInternalStructures
       generateParserInternalArray1 opts schema
@@ -422,11 +423,11 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
 generateParserExtractTopLevel1 ::
   HasCallStack =>
   GenerateOpts ->
-  [HaskellTypeName] ->
+  [TypeWithAttrs] ->
   CG ()
 generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
     forM_ topTypes $ \topType -> do
-        let topTypeName = bld topType.unHaskellTypeName
+        let topTypeName = bld topType.type_.unHaskellTypeName
         outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
         outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
     withIndent $ do
@@ -565,23 +566,28 @@ data SequenceGI = SequenceGI
   , fields :: [FieldGI]
   }
 
+getSequenceAttrs :: SequenceGI -> AttributesInfo
+getSequenceAttrs s = case NE.nonEmpty $ map (.xmlName) s.attributes of
+  Nothing -> NoAttrs
+  Just a -> AttributesInfo a
+
 data ChoiceGI = ChoiceGI
   { typeName :: HaskellTypeName
-  , alts :: [(XMLString, HaskellConsName, HaskellTypeName)]
+  , alts :: [(XMLString, HaskellConsName, TypeWithAttrs)]
   }
 
 mkChoiceTypeDeclaration :: ChoiceGI -> SumType
 mkChoiceTypeDeclaration ch =
   ( TyData $ bld ch.typeName.unHaskellTypeName
   , flip map ch.alts \(_eltName, cons_, conType) -> do
-    (TyCon $ bld cons_.unHaskellConsName, TyType $ bld conType.unHaskellTypeName)
+    (TyCon $ bld cons_.unHaskellConsName, TyType $ bld conType.type_.unHaskellTypeName)
   )
 
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
   , xmlName :: XMLString
   , cardinality :: Repeatedness
-  , typeName :: HaskellTypeName
+  , typeName :: TypeWithAttrs
   }
 
 mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
@@ -593,7 +599,7 @@ mkSequenceTypeDeclaration s =
 mkFieldDeclaration :: FieldGI -> TyField
 mkFieldDeclaration fld =
   ( TyFieldName $ B.byteString fld.haskellName.unHaskellFieldName
-  , TyType $ mkCardinality $ B.byteString fld.typeName.unHaskellTypeName
+  , TyType $ mkCardinality $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
   where
     mkCardinality x = case fld.cardinality of
@@ -607,9 +613,9 @@ exampleSequenceGI = SequenceGI
   , consName = "TestCons"
   , attributes = []
   , fields =
-    [ FieldGI "departure" "departureElt" RepMaybe "String"
-    , FieldGI "arrival" "arrivalElt" RepOnce "Int"
-    , FieldGI "techStops" "techStopsElt" RepMany "TechStop"
+    [ FieldGI "departure" "departureElt" RepMaybe $ typeNoAttrs "String"
+    , FieldGI "arrival" "arrivalElt" RepOnce $ typeNoAttrs "Int"
+    , FieldGI "techStops" "techStopsElt" RepMany $ typeNoAttrs "TechStop"
     ]
   }
 
@@ -647,7 +653,7 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
         ofsNames = zip ofsNames' (tail ofsNames')
         (arrRet, strRet) = bimap bld bld $ ofsNames' !! length fields
     forM_ (zip ofsNames fields) $ \(((arrOfs, strOfs), (arrOfs', strOfs')), field) -> do
-      let parserName = getParserNameForType field.typeName
+      let parserName = getParserNameForType field.typeName.type_
       let (isUseArrOfs, tagQuantifier::XMLString) = case field.cardinality of
               RepMaybe -> (True,  "inMaybeTag")
               RepOnce  -> (False, "inOneTag")
@@ -665,7 +671,7 @@ generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
     out1 [qc|let tagName = getTagName strStart|]
     out1 [qc|case tagName of|]
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((altTag, _cons, type_), altIdx) -> do
-      let altParser = getParserNameForType type_
+      let altParser = getParserNameForType type_.type_
           vecWrite {- | isUnsafe -} = "V.unsafeWrite" :: B.Builder
       out1 [qc|"{altTag}" -> {vecWrite} vec arrStart {altIdx} >> inOneTag "{altTag}" strStart ({altParser} $ arrStart + 1)|]
 
@@ -679,7 +685,7 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
     out1 [qc|case altIdx of|]
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((_altTag, cons_, type_), altIdx) -> do
       let consBld = bld cons_.unHaskellConsName
-          typeBld = bld type_.unHaskellTypeName
+          typeBld = bld type_.type_.unHaskellTypeName
       out1 [qc|{altIdx} -> first {consBld} $ extract{typeBld}Content (ofs + 1)|]
 
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
@@ -712,12 +718,12 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
                 RepMaybe -> Just "extractMaybe"
                 RepOnce  -> Nothing
                 _        -> Just "extractMany" -- TODO add extractExact support
-            fieldTypeName = bld fld.typeName.unHaskellTypeName
+            fieldTypeName = bld fld.typeName.type_.unHaskellTypeName
         case fieldQuantifier of
                  Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
                  Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
 
-lookupHaskellTypeBySchemaType :: XMLString -> CG HaskellTypeName
+lookupHaskellTypeBySchemaType :: XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType xmlType = do
   knownTypes_ <- Lens.use knownTypes
   pure $ fromMaybe (error "unknown type") $ Map.lookup xmlType knownTypes_
@@ -771,20 +777,20 @@ processComplex ::
   Bool ->
   [Attr] ->
   TyPart ->
-  CG HaskellTypeName
+  CG TypeWithAttrs
 processComplex (normalizeTypeName -> possibleName) _mixed attrs inner = case inner of
   Seq seqParts -> case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
     Just elts -> do
       sGI <- mkSequenceGI elts
       registerSequenceGI sGI
-      pure sGI.typeName
+      pure $ TypeWithAttrs sGI.typeName $ getSequenceAttrs sGI
   Choice choiceAlts -> case traverse getElement choiceAlts of
     Nothing -> error "only choice between elements is supported"
     Just elts -> do
       chGI <- mkChoiceGI elts
       registerChoiceGI chGI
-      pure chGI.typeName
+      pure $ typeNoAttrs chGI.typeName
   _ -> error "anything other than Seq inside Complex is not supported"
   where
   mkChoiceGI :: [Element] -> CG ChoiceGI
@@ -835,7 +841,7 @@ eltNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
 attrNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 
-processType :: XMLString -> Type -> CG HaskellTypeName
+processType :: XMLString -> Type -> CG TypeWithAttrs
 processType (normalizeTypeName -> possibleName) = \case
   Ref knownType ->
     lookupHaskellTypeBySchemaType knownType
@@ -848,14 +854,14 @@ processType (normalizeTypeName -> possibleName) = \case
       let
         enum_ = EnumGI {typeName, constrs}
       registerEnumGI enum_
-      pure typeName
+      pure $ typeNoAttrs typeName
     Pattern{} -> do
       typeName <- getUniqueTypeName possibleName
       consName <- getUniqueConsName possibleName
       wrappedType <- lookupHaskellTypeBySchemaType base
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
-      pure typeName
+      pure $ typeNoAttrs typeName
     _ -> error "not enum or pattern, not supported"
   _ -> error "not ref and complex, not supported"
 
@@ -873,14 +879,14 @@ mkEnumTypeDeclaration en =
 data NewtypeGI = NewtypeGI
   { typeName :: HaskellTypeName
   , consName :: HaskellConsName
-  , wrappedType :: HaskellTypeName
+  , wrappedType :: TypeWithAttrs
   }
  
 mkNewtypeDeclaration :: NewtypeGI -> (TyData, TyCon, TyType)
 mkNewtypeDeclaration ngi =
   ( TyData $ B.byteString ngi.typeName.unHaskellTypeName
   , TyCon $ B.byteString ngi.consName.unHaskellConsName
-  , TyType $ B.byteString ngi.wrappedType.unHaskellTypeName
+  , TyType $ B.byteString ngi.wrappedType.type_.unHaskellTypeName
   )
 
 generateNewtypeParseFunc :: NewtypeGI -> FunctionBody
@@ -899,7 +905,7 @@ generateNewtypeExtractFunc :: NewtypeGI -> FunctionBody
 generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
   let typeName = bld ngi.typeName.unHaskellTypeName
       consName = bld ngi.consName.unHaskellConsName
-      wrappedName = bld ngi.wrappedType.unHaskellTypeName
+      wrappedName = bld ngi.wrappedType.type_.unHaskellTypeName
   out1 [qc|extract{typeName}Content ofs =|]
   withIndent1 do
     out1 [qc|first {consName} $ extract{wrappedName}Content ofs|]
@@ -929,7 +935,7 @@ registerNewtypeGI ngi = do
 
  
 
-registerNamedType :: XMLString -> HaskellTypeName -> CG ()
+registerNamedType :: XMLString -> TypeWithAttrs -> CG ()
 registerNamedType xmlName haskellType = knownTypes %= Map.insert xmlName haskellType
 
 processSchemaNamedTypes :: TypeDict -> CG ()
