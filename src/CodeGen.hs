@@ -244,10 +244,9 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|getAttrName :: Int -> XMLString|]
         outCodeLine' [qc|getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs|]
         outCodeLine' [qc|inOneTag          tag strOfs inParser = toError tag strOfs $ inOneTag' True tag strOfs inParser|]
-        outCodeLine' [qc|inOneTagWithAttrs tag strOfs inParser = toError tag strOfs $ inOneTag' True  tag strOfs inParser|]
-        outCodeLine' [qc|inOneTagWithAttrs tag strOfs getAttrLocation inParser = toError tag strOfs $ inOneTagWithAttrs' tag strOfs getAttrLocation inParser|]
+        outCodeLine' [qc|inOneTagWithAttrs getAttrLocation tag strOfs inParser = toError tag strOfs $ inOneTagWithAttrs' getAttrLocation tag strOfs inParser|]
         outCodeLine' [qc|-- parseTagWithAttrs expectedTag getAttrLocation ofs|]
-        outCodeLine' [qc|inOneTagWithAttrs' tag strOfs getAttrLocation inParser = do|]
+        outCodeLine' [qc|inOneTagWithAttrs' getAttrLocation tag strOfs inParser = do|]
         outCodeLine' [qc|    let tagOfs = skipToOpenTag strOfs + 1|]
         outCodeLine' [qc|    q <- parseTagWithAttrs tag getAttrLocation tagOfs|]
         outCodeLine' [qc|    case q of|]
@@ -337,7 +336,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|    then pure ofs1|]
         outCodeLine' [qc|    else do|]
         outCodeLine' [qc|    let|]
-        outCodeLine' [qc|      attrName = echo "attrName" $ getAttrName ofs1|]
+        outCodeLine' [qc|      attrName = getAttrName ofs1|]
         outCodeLine' [qc|      ofsAttrContent = ofs1 + BS.length attrName + 2|]
         outCodeLine' [qc|    attrContentEnd <- parseAttrContent (getAttrLocation attrName) ofsAttrContent|]
         outCodeLine' [qc|    parseAttributes getAttrLocation (attrContentEnd + 1)|]
@@ -399,10 +398,10 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|isSpaceChar c = c == 32 || c == 10 || c == 9 || c == 13|]
         outCodeLine' [qc|skipHeader :: Int -> Int|]
         outCodeLine' [qc|skipHeader ofs|]
-        outCodeLine' [qc|eqChar       = 61 -- '='|]
-        outCodeLine' [qc|dquoteChar   = 34 -- '"'|]
         outCodeLine' [qc|  | bs `{bsIndex}` ofs == openTagChar && bs `{bsIndex}` (ofs + 1) == questionChar = skipToCloseTag (ofs + 2) + 1|]
         outCodeLine' [qc|  | otherwise = ofs|]
+        outCodeLine' [qc|eqChar       = 61 -- '='|]
+        outCodeLine' [qc|dquoteChar   = 34 -- '"'|]
         outCodeLine' [qc|slashChar    = 47 -- '<'|]
         outCodeLine' [qc|openTagChar  = 60 -- '<'|]
         outCodeLine' [qc|closeTagChar = 62 -- '>'|]
@@ -652,18 +651,57 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
                     :: [(XMLString, XMLString)]
         ofsNames = zip ofsNames' (tail ofsNames')
         (arrRet, strRet) = bimap bld bld $ ofsNames' !! length fields
-    forM_ (zip ofsNames fields) $ \(((arrOfs, strOfs), (arrOfs', strOfs')), field) -> do
-      let parserName = getParserNameForType field.typeName.type_
-      let (isUseArrOfs, tagQuantifier::XMLString) = case field.cardinality of
-              RepMaybe -> (True,  "inMaybeTag")
-              RepOnce  -> (False, "inOneTag")
-              _        -> (True,  "inManyTags")
-          (arrOfs1, arrOfs2)::(XMLString,XMLString) =
-              if isUseArrOfs then ([qc| {arrOfs}|],"") else ("", [qc| {arrOfs}|])
-          tagName = field.xmlName
-      -- TODO parse with attributes!
-      out1 [qc|({arrOfs'}, {strOfs'}) <- {tagQuantifier} "{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
+    forM_ (zip ofsNames fields) $ \((oldOffsets, (arrOfs', strOfs')), field) -> do
+      out1 [qc|({arrOfs'}, {strOfs'}) <- do|]
+      withIndent1 do
+        offsetsAfterAllocGen <- generateAttrsAllocation oldOffsets field.typeName
+        generateParseElementCall offsetsAfterAllocGen field
     out1 [qc|pure ({arrRet}, {strRet})|]
+
+generateAttrsAllocation ::
+  (XMLString, XMLString) ->
+  TypeWithAttrs ->
+  CodeWriter' (XMLString, XMLString)
+generateAttrsAllocation (arrOfs, strOfs) TypeWithAttrs{type_, attrs = attrInfo} =
+  withPresentAttrs \attrs -> do
+    let typeName = type_.unHaskellTypeName
+    let attrsNum = length attrs
+    let newArrOfsName = [qc|ofsAfter{bld typeName}Attrs|] :: XMLString
+    let totalAllocLen = 2*attrsNum
+    out1 [qc|let {newArrOfsName} = {arrOfs} + {totalAllocLen}|]
+    out1 [qc|let {getAttrsAllocatorName type_} = \case|]
+    forM_ (zip [0::Int, 2 .. ] $ NE.toList attrs) \(ofs, attr) ->
+      out1 [qc|      "{attr}" -> {arrOfs} + {ofs}|]
+    out1 [qc|      _ -> (-1)|]
+    out1 [qc|forM_ [0..{totalAllocLen - 1}] $ \i -> V.unsafeWrite vec ({arrOfs} + i) 0|]
+    pure (newArrOfsName, strOfs)
+  where
+  withPresentAttrs action = case attrInfo of
+    NoAttrs -> pure (arrOfs, strOfs)
+    AttributesInfo neStr -> action neStr
+
+generateParseElementCall :: (XMLString, XMLString) -> FieldGI -> CodeWriter
+generateParseElementCall (arrOfs, strOfs) field = do
+  let parsedType = field.typeName.type_
+      parserName = getParserNameForType parsedType
+      hasAttrs = field.typeName.attrs /= NoAttrs
+      (allocator, tagQModifier) =
+        if hasAttrs
+        then (getAttrsAllocatorName parsedType <> " ", (<> "WithAttrs"))
+        else ("", identity)
+  let (isUseArrOfs, tagQuantifier::XMLString) = case field.cardinality of
+          RepMaybe -> (True,  "inMaybeTag")
+          RepOnce  -> (False, "inOneTag")
+          _        -> (True,  "inManyTags")
+      (arrOfs1, arrOfs2)::(XMLString,XMLString) =
+          -- if isUseArrOfs then ([qc| {arrOfs}|], "") else ("", [qc| {arrOfs}|])
+          if isUseArrOfs then ([qc| {arrOfs}|], "") else ("", [qc| {arrOfs}|])
+      tagName = field.xmlName
+  -- TODO parse with attributes!
+  out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
+
+getAttrsAllocatorName :: HaskellTypeName -> XMLString
+getAttrsAllocatorName t = [qc|get{bld $ unHaskellTypeName t}AttrOffset|]
 
 generateChoiceParseFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
@@ -965,3 +1003,5 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "module XMLSchema where"
     outCodeLine (basePrologue isUnsafe)
 
+identity :: p -> p
+identity x = x

@@ -143,6 +143,7 @@ data AttributesInfo
   | AttributesInfo
     { attrs :: NE.NonEmpty XMLString
     }
+  deriving stock (Eq, Show)
 
 typeNoAttrs :: HaskellTypeName -> TypeWithAttrs
 typeNoAttrs t = TypeWithAttrs t NoAttrs
