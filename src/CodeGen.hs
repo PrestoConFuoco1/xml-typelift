@@ -729,13 +729,15 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
   let recType = bld s.typeName.unHaskellTypeName
+  let attrNum = length s.attributes
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 $ do
-      attrFields <- forM s.attributes $ \attr -> do
+      attrFields <- forM (zip s.attributes [1..attrNum]) $ \(attr, aIdx) -> do
+          let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
           let haskellAttrName = attr.haskellName.unHaskellFieldName
-          out1 [qc|let {bld haskellAttrName} = Nothing in|]
+          out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractMaybe {oldOfs} extractXMLStringContent in|]
           return haskellAttrName
-      properFields <- forM (zip s.fields [1..]) $ \(fld, ofsIdx::Int) -> do
+      properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
                   fieldName = fld.haskellName.unHaskellFieldName
                   extractor = getExtractorNameWithQuant ofs fld
