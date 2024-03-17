@@ -786,7 +786,7 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
 lookupHaskellTypeBySchemaType :: XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType xmlType = do
   knownTypes_ <- Lens.use knownTypes
-  pure $ fromMaybe (error "unknown type") $ Map.lookup xmlType knownTypes_
+  pure $ fromMaybe (error $ "unknown type " <> show xmlType) $ Map.lookup xmlType knownTypes_
 
 registerDataDeclaration :: TypeDecl -> CG ()
 registerDataDeclaration decl = typeDecls %= (decl :)
@@ -915,15 +915,18 @@ processType (normalizeTypeName -> possibleName) = \case
         enum_ = EnumGI {typeName, constrs}
       registerEnumGI enum_
       pure $ typeNoAttrs typeName
-    Pattern{} -> do
+    Pattern{} -> processAsNewtype base
+    _ -> processAsNewtype base
+  _ -> error "not ref and complex, not supported"
+  where
+  processAsNewtype base = do
       typeName <- getUniqueTypeName possibleName
       consName <- getUniqueConsName possibleName
       wrappedType <- lookupHaskellTypeBySchemaType base
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
       pure $ typeNoAttrs typeName
-    _ -> error "not enum or pattern, not supported"
-  _ -> error "not ref and complex, not supported"
+
 
 data EnumGI = EnumGI
   { typeName :: HaskellTypeName
