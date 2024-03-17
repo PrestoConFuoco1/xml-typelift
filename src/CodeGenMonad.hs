@@ -36,6 +36,9 @@ module CodeGenMonad(-- Code generation monad
                    ,extractFunctions
                    ,allocatedHaskellTypes
                    ,allocatedHaskellConses
+                   ,processedSchemaTypes
+                   ,schemaTypesMap
+                   
 
                    -- Translating identifiers
                    ,TargetIdNS(..)
@@ -157,6 +160,8 @@ data CGState =
   , _typeDecls :: [TypeDecl]
   , _parseFunctions :: [FunctionBody]
   , _extractFunctions :: [FunctionBody]
+  , _processedSchemaTypes :: Set.Set XMLString
+  , _schemaTypesMap :: Map.Map XMLString Type
 
   -- FOR GENERATING
   , _indent               :: Int
@@ -211,6 +216,8 @@ initialState  = CGState
                []
                []
                []
+               Set.empty
+               Map.empty
                0
 
 out :: TH.Q TH.Dec -> CG ()

@@ -136,6 +136,7 @@ codegen c sch = codegen' sch $ generateParser2 False c sch
 generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
 generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
     generateModuleHeading opts
+    schemaTypesMap .= schema.types
     processSchemaNamedTypes schema.types
     topNames <- forM schema.tops \el -> processType (eName el) (eType el)
     declaredTypes <- Lens.use typeDecls
@@ -786,7 +787,14 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
 lookupHaskellTypeBySchemaType :: XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType xmlType = do
   knownTypes_ <- Lens.use knownTypes
-  pure $ fromMaybe (error $ "unknown type " <> show xmlType) $ Map.lookup xmlType knownTypes_
+  case Map.lookup xmlType knownTypes_ of
+    Nothing -> do
+      typeDict <- Lens.use schemaTypesMap
+      let schemaType =
+            fromMaybe (error $ "unknown schema type" <> show xmlType) $
+              Map.lookup xmlType typeDict 
+      processSchemaNamedType (xmlType, schemaType)
+    Just x -> pure x
 
 registerDataDeclaration :: TypeDecl -> CG ()
 registerDataDeclaration decl = typeDecls %= (decl :)
@@ -999,13 +1007,22 @@ registerNewtypeGI ngi = do
  
 
 registerNamedType :: XMLString -> TypeWithAttrs -> CG ()
-registerNamedType xmlName haskellType = knownTypes %= Map.insert xmlName haskellType
+registerNamedType xmlName haskellType = do
+  knownTypes %= Map.insert xmlName haskellType
+  processedSchemaTypes %= Set.insert xmlName
+
+processSchemaNamedType :: (XMLString, Type) -> CG TypeWithAttrs
+processSchemaNamedType (tName, tDef) = do
+  q <- Lens.use knownTypes
+  case Map.lookup tName q of
+    Just q_ -> pure q_
+    Nothing -> do
+      haskellTypeName <- processType tName tDef
+      registerNamedType tName haskellTypeName
+      pure haskellTypeName
 
 processSchemaNamedTypes :: TypeDict -> CG ()
-processSchemaNamedTypes dict = forM_ (Map.toList dict) \(tName, tDef) -> do
-  haskellTypeName <- processType tName tDef
-  registerNamedType tName haskellTypeName
-
+processSchemaNamedTypes dict = forM_ (Map.toList dict) processSchemaNamedType
 
 generateModuleHeading ::
   HasCallStack =>
