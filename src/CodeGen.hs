@@ -244,25 +244,25 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|getAttrName :: Int -> XMLString|]
         outCodeLine' [qc|getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs|]
         outCodeLine' [qc|inOneTag          tag strOfs inParser = toError tag strOfs $ inOneTag' True tag strOfs inParser|]
-        outCodeLine' [qc|inOneTagWithAttrs getAttrLocation tag strOfs inParser = toError tag strOfs $ inOneTagWithAttrs' getAttrLocation tag strOfs inParser|]
-        outCodeLine' [qc|-- parseTagWithAttrs expectedTag getAttrLocation ofs|]
-        outCodeLine' [qc|inOneTagWithAttrs' getAttrLocation tag strOfs inParser = do|]
-        outCodeLine' [qc|    let tagOfs = skipToOpenTag strOfs + 1|]
-        outCodeLine' [qc|    q <- parseTagWithAttrs tag getAttrLocation tagOfs|]
+        outCodeLine' [qc|inOneTagWithAttrs attrAlloc attrRouting arrOfs tag strOfs inParser =|]
+        outCodeLine' [qc|  toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting arrOfs tag strOfs inParser|]
+        outCodeLine' [qc|inOneTagWithAttrs' attrAlloc attrRouting arrOfs tag strOfs inParser = do|]
+        outCodeLine' [qc|    let tagStrOfs = skipToOpenTag strOfs + 1|]
+        outCodeLine' [qc|    q <- parseTagWithAttrs attrAlloc attrRouting arrOfs tag tagStrOfs|]
         outCodeLine' [qc|    case q of|]
         outCodeLine' [qc|        Nothing -> do|]
-        outCodeLine' [qc|            updateFarthest tag tagOfs|]
+        outCodeLine' [qc|            updateFarthest tag tagStrOfs|]
         outCodeLine' [qc|            return Nothing|]
-        outCodeLine' [qc|        Just (ofs', True) -> do|]
+        outCodeLine' [qc|        Just ((ofs', arrOfs), True) -> do|]
         outCodeLine' [qc|            (arrOfs, strOfs) <- inParser (ofs' - 1)|]
         outCodeLine' [qc|            return $ Just (arrOfs, ofs')|]
-        outCodeLine' [qc|        Just (ofs', False) -> do|]
+        outCodeLine' [qc|        Just ((ofs', arrOfs), False) -> do|]
         outCodeLine' [qc|            (arrOfs, strOfs) <- inParser ofs'|]
         outCodeLine' [qc|            let ofs'' = skipToOpenTag strOfs|]
         outCodeLine' [qc|            if bs `BSU.unsafeIndex` (ofs'' + 1) == slashChar then do|]
         outCodeLine' [qc|                case ensureTag False tag (ofs'' + 2) of|]
         outCodeLine' [qc|                    Nothing     -> do|]
-        outCodeLine' [qc|                        updateFarthest tag tagOfs|]
+        outCodeLine' [qc|                        updateFarthest tag tagStrOfs|]
         outCodeLine' [qc|                        return Nothing|]
         outCodeLine' [qc|                    Just (ofs''', _) -> return $ Just (arrOfs, ofs''')|]
         outCodeLine' [qc|            else do|]
@@ -329,7 +329,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|  | otherwise|]
         outCodeLine' [qc|        = Nothing|]
         outCodeLine' [qc|  where ofsToEnd = ofs + BS.length expectedTag|]
-        outCodeLine' [qc|parseAttributes getAttrLocation strOfs = do|]
+        outCodeLine' [qc|parseAttributes attrRouting strOfs arrOfs = do|]
         outCodeLine' [qc|  let ofs1 = skipSpaces strOfs|]
         outCodeLine' [qc|      curCh = bs `BSU.unsafeIndex` ofs1 |]
         outCodeLine' [qc|  if curCh == slashChar || curCh == closeTagChar|]
@@ -338,18 +338,19 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|    let|]
         outCodeLine' [qc|      attrName = getAttrName ofs1|]
         outCodeLine' [qc|      ofsAttrContent = ofs1 + BS.length attrName + 2|]
-        outCodeLine' [qc|    attrContentEnd <- parseAttrContent (getAttrLocation attrName) ofsAttrContent|]
-        outCodeLine' [qc|    parseAttributes getAttrLocation (attrContentEnd + 1)|]
-        outCodeLine' [qc|parseTagWithAttrs expectedTag getAttrLocation ofs|]
-        outCodeLine' [qc|  | expectedTag `BS.isPrefixOf` (BS.drop ofs bs) =|]
+        outCodeLine' [qc|    attrContentEnd <- parseAttrContent (attrRouting arrOfs attrName) ofsAttrContent|]
+        outCodeLine' [qc|    parseAttributes attrRouting (attrContentEnd + 1) arrOfs|]
+        outCodeLine' [qc|parseTagWithAttrs attrAlloc attrRouting expectedTag ofs arrOfs|]
+        outCodeLine' [qc|  | expectedTag `BS.isPrefixOf` (BS.drop ofs bs) = do|]
+        outCodeLine' [qc|      arrOfsAfterAttrs <- attrAlloc arrOfs|]
         outCodeLine' [qc|      if bs `BSU.unsafeIndex` ofsToEnd == closeTagChar|]
-        outCodeLine' [qc|        then pure $ Just (ofsToEnd + 1, False)|]
+        outCodeLine' [qc|        then pure $ Just ((ofsToEnd + 1, arrOfsAfterAttrs), False)|]
         outCodeLine' [qc|      else if isSpaceChar (bs `BSU.unsafeIndex` ofsToEnd)|]
         outCodeLine' [qc|        then do|]
         outCodeLine' [qc|          _failOfs <- STRef.readSTRef farthest|]
-        outCodeLine' [qc|          strOfsAfterAttrs <- parseAttributes getAttrLocation ofsToEnd|]
+        outCodeLine' [qc|          strOfsAfterAttrs <- parseAttributes attrRouting ofsToEnd arrOfs|]
         outCodeLine' [qc|          let ofs' = skipToCloseTag strOfsAfterAttrs|]
-        outCodeLine' [qc|          pure $ Just (ofs' + 1, bs `BSU.unsafeIndex` (ofs' - 1) == slashChar)|]
+        outCodeLine' [qc|          pure $ Just ((ofs' + 1, arrOfsAfterAttrs), bs `BSU.unsafeIndex` (ofs' - 1) == slashChar)|]
         outCodeLine' [qc|      else|]
         outCodeLine' [qc|        pure Nothing|]
         outCodeLine' [qc|  | otherwise = pure Nothing|]
@@ -643,8 +644,10 @@ bld :: XMLString -> B.Builder
 bld = B.byteString
 
 generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
-generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
-  out1 (getParserNameForType s.typeName <> " arrStart strStart = do") >> withIndent1 do
+generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
+  generateAttrsAllocation TypeWithAttrs { type_ = s.typeName, attrs = getSequenceAttrs s }
+  out1 (getParserNameForType s.typeName <> " arrStart strStart = do")
+  withIndent1 do
     let (arrStart, strStart) = ("arrStart", "strStart")
         fields = {- s.attributes <> -} s.fields
     let ofsNames' = ((arrStart, strStart) : [ ( [qc|arrOfs{i}|], [qc|strOfs{i}|]) | i <- [(1::Int)..]])
@@ -654,30 +657,29 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter $
     forM_ (zip ofsNames fields) $ \((oldOffsets, (arrOfs', strOfs')), field) -> do
       out1 [qc|({arrOfs'}, {strOfs'}) <- do|]
       withIndent1 do
-        offsetsAfterAllocGen <- generateAttrsAllocation oldOffsets field.typeName
-        generateParseElementCall offsetsAfterAllocGen field
+        -- offsetsAfterAllocGen <- generateAttrsAllocation oldOffsets field.typeName
+        generateParseElementCall oldOffsets field
     out1 [qc|pure ({arrRet}, {strRet})|]
 
 generateAttrsAllocation ::
-  (XMLString, XMLString) ->
   TypeWithAttrs ->
-  CodeWriter' (XMLString, XMLString)
-generateAttrsAllocation (arrOfs, strOfs) TypeWithAttrs{type_, attrs = attrInfo} =
+  CodeWriter
+generateAttrsAllocation TypeWithAttrs{type_, attrs = attrInfo} =
   withPresentAttrs \attrs -> do
-    let typeName = type_.unHaskellTypeName
     let attrsNum = length attrs
-    let newArrOfsName = [qc|ofsAfter{bld typeName}Attrs|] :: XMLString
     let totalAllocLen = 2*attrsNum
-    out1 [qc|let {newArrOfsName} = {arrOfs} + {totalAllocLen}|]
-    out1 [qc|let {getAttrsAllocatorName type_} = \case|]
-    forM_ (zip [0::Int, 2 .. ] $ NE.toList attrs) \(ofs, attr) ->
-      out1 [qc|      "{attr}" -> {arrOfs} + {ofs}|]
-    out1 [qc|      _ -> (-1)|]
-    out1 [qc|forM_ [0..{totalAllocLen - 1}] $ \i -> V.unsafeWrite vec ({arrOfs} + i) 0|]
-    pure (newArrOfsName, strOfs)
+    out1 [qc|{getAttrsAllocatorName type_} ofs = do|]
+    withIndent1 do
+      out1 [qc|forM_ [0..{totalAllocLen - 1}] $ \i -> V.unsafeWrite vec (ofs + i) 0|]
+      out1 [qc|pure $ ofs + {totalAllocLen}|]
+    out1 [qc|{getAttrsRoutingName type_} ofs = \case|]
+    withIndent1 $ do
+      forM_ (zip [0::Int, 2 .. ] $ NE.toList attrs) \(ofs, attr) ->
+        out1 [qc|"{attr}" -> ofs + {ofs}|]
+      out1 [qc|_ -> (-1)|]
   where
   withPresentAttrs action = case attrInfo of
-    NoAttrs -> pure (arrOfs, strOfs)
+    NoAttrs -> pure ()
     AttributesInfo neStr -> action neStr
 
 generateParseElementCall :: (XMLString, XMLString) -> FieldGI -> CodeWriter
@@ -685,9 +687,9 @@ generateParseElementCall (arrOfs, strOfs) field = do
   let parsedType = field.typeName.type_
       parserName = getParserNameForType parsedType
       hasAttrs = field.typeName.attrs /= NoAttrs
-      (allocator, tagQModifier) =
+      (allocator :: B.Builder, tagQModifier) =
         if hasAttrs
-        then (getAttrsAllocatorName parsedType <> " ", (<> "WithAttrs"))
+        then ([qc|{getAttrsAllocatorName parsedType} {getAttrsRoutingName parsedType} {arrOfs} |], (<> "WithAttrs"))
         else ("", identity)
   let (isUseArrOfs, tagQuantifier::XMLString) = case field.cardinality of
           RepMaybe -> (True,  "inMaybeTag")
@@ -700,8 +702,11 @@ generateParseElementCall (arrOfs, strOfs) field = do
   -- TODO parse with attributes!
   out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
 
+getAttrsRoutingName :: HaskellTypeName -> XMLString
+getAttrsRoutingName t = [qc|get{bld $ unHaskellTypeName t}AttrOffset|]
+
 getAttrsAllocatorName :: HaskellTypeName -> XMLString
-getAttrsAllocatorName t = [qc|get{bld $ unHaskellTypeName t}AttrOffset|]
+getAttrsAllocatorName t = [qc|allocate{bld $ unHaskellTypeName t}Attrs|]
 
 generateChoiceParseFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
@@ -735,7 +740,8 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
       attrFields <- forM (zip s.attributes [1..attrNum]) $ \(attr, aIdx) -> do
           let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
           let haskellAttrName = attr.haskellName.unHaskellFieldName
-          out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractMaybe {oldOfs} extractXMLStringContent in|]
+          let haskellTypeName = bld attr.typeName.type_.unHaskellTypeName
+          out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractMaybe {oldOfs} extract{haskellTypeName}Content in|]
           return haskellAttrName
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
