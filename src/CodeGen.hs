@@ -214,7 +214,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
             outCodeLine' [qc|parse{topName} vec = do|]
             withIndent $ do
                 outCodeLine' [qc|{vecWrite} vec (0::Int) (0::Int)|]
-                outCodeLine' [qc|(_, _) <- inOneTag "{topTag}" (skipSpaces $ skipHeader $ skipSpaces 0) $ parse{topName}Content 0|]
+                outCodeLine' [qc|(_, _) <- inOneTag "{topTag}" 0 (skipSpaces $ skipHeader $ skipSpaces 0) parse{topName}Content|]
                 outCodeLine' [qc|return ()|]
                 outCodeLine' [qc|where|]
                 parseFuncs_ <- Lens.use parseFunctions
@@ -243,21 +243,21 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|getTagName strOfs = BS.takeWhile (\c -> not (isSpaceChar c || c == closeTagChar || c == slashChar)) $ BS.drop (skipToOpenTag strOfs + 1) bs|]
         outCodeLine' [qc|getAttrName :: Int -> XMLString|]
         outCodeLine' [qc|getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs|]
-        outCodeLine' [qc|inOneTag          tag strOfs inParser = toError tag strOfs $ inOneTag' True tag strOfs inParser|]
-        outCodeLine' [qc|inOneTagWithAttrs attrAlloc attrRouting arrOfs tag strOfs inParser =|]
-        outCodeLine' [qc|  toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting arrOfs tag strOfs inParser|]
-        outCodeLine' [qc|inOneTagWithAttrs' attrAlloc attrRouting arrOfs tag strOfs inParser = do|]
+        outCodeLine' [qc|inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' True tag arrOfs strOfs inParser|]
+        outCodeLine' [qc|inOneTagWithAttrs attrAlloc attrRouting tag arrOfs strOfs inParser =|]
+        outCodeLine' [qc|  toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser|]
+        outCodeLine' [qc|inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do|]
         outCodeLine' [qc|    let tagStrOfs = skipToOpenTag strOfs + 1|]
-        outCodeLine' [qc|    q <- parseTagWithAttrs attrAlloc attrRouting arrOfs tag tagStrOfs|]
+        outCodeLine' [qc|    q <- parseTagWithAttrs attrAlloc attrRouting tag arrOfs tagStrOfs|]
         outCodeLine' [qc|    case q of|]
         outCodeLine' [qc|        Nothing -> do|]
         outCodeLine' [qc|            updateFarthest tag tagStrOfs|]
         outCodeLine' [qc|            return Nothing|]
-        outCodeLine' [qc|        Just ((ofs', arrOfs), True) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser (ofs' - 1)|]
+        outCodeLine' [qc|        Just ((ofs', arrOfs'), True) -> do|]
+        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs' (ofs' - 1)|]
         outCodeLine' [qc|            return $ Just (arrOfs, ofs')|]
-        outCodeLine' [qc|        Just ((ofs', arrOfs), False) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser ofs'|]
+        outCodeLine' [qc|        Just ((ofs', arrOfs'), False) -> do|]
+        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs' ofs'|]
         outCodeLine' [qc|            let ofs'' = skipToOpenTag strOfs|]
         outCodeLine' [qc|            if bs `BSU.unsafeIndex` (ofs'' + 1) == slashChar then do|]
         outCodeLine' [qc|                case ensureTag False tag (ofs'' + 2) of|]
@@ -267,17 +267,17 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|                    Just (ofs''', _) -> return $ Just (arrOfs, ofs''')|]
         outCodeLine' [qc|            else do|]
         outCodeLine' [qc|                return Nothing|]
-        outCodeLine' [qc|inOneTag' hasAttrs tag strOfs inParser = do|]
+        outCodeLine' [qc|inOneTag' hasAttrs tag arrOfs strOfs inParser = do|]
         outCodeLine' [qc|    let tagOfs = skipToOpenTag strOfs + 1|]
         outCodeLine' [qc|    case ensureTag hasAttrs tag tagOfs of|]
         outCodeLine' [qc|        Nothing -> do|]
         outCodeLine' [qc|            updateFarthest tag tagOfs|]
         outCodeLine' [qc|            return Nothing|]
         outCodeLine' [qc|        Just (ofs', True) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser (ofs' - 1)|] -- TODO points to special unparseable place
+        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs (ofs' - 1)|] -- TODO points to special unparseable place
         outCodeLine' [qc|            return $ Just (arrOfs, ofs')|]
         outCodeLine' [qc|        Just (ofs', _) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser ofs'|]
+        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs ofs'|]
         outCodeLine' [qc|            let ofs'' = skipToOpenTag strOfs|]
         outCodeLine' [qc|            if bs `{bsIndex}` (ofs'' + 1) == slashChar then do|]
         outCodeLine' [qc|                case ensureTag False tag (ofs'' + 2) of|]
@@ -288,28 +288,46 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|            else do|]
         outCodeLine' [qc|                return Nothing|]
         -- ~~~~~~~~
-        outCodeLine' [qc|inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser|] -- TODO add attributes processing
-        --outCodeLine' [qc|inMaybeTag' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)|]
-        outCodeLine' [qc|inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    inOneTag' hasAttrs tag strOfs (inParser arrOfs) >>= \case|]
+        outCodeLine' [qc|inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser|]
+        outCodeLine' [qc|inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs strOfs inParser|]
+        outCodeLine' [qc|inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do|]
+        outCodeLine' [qc|    inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser >>= \case|]
         outCodeLine' [qc|        Just res -> return res|]
         outCodeLine' [qc|        Nothing -> do|]
         outCodeLine' [qc|            updateFarthest tag strOfs|]
         outCodeLine' [qc|            {vecWrite} vec arrOfs 0|]
         outCodeLine' [qc|            {vecWrite} vec (arrOfs + 1) 0|]
         outCodeLine' [qc|            return (arrOfs + 2, strOfs)|]
-        outCodeLine' [qc|inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser|] -- TODO add attributes processing
-        outCodeLine' [qc|inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser|]
+        outCodeLine' [qc|inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do|]
+        outCodeLine' [qc|    inOneTag' hasAttrs tag arrOfs strOfs inParser >>= \case|]
+        outCodeLine' [qc|        Just res -> return res|]
+        outCodeLine' [qc|        Nothing -> do|]
+        outCodeLine' [qc|            updateFarthest tag strOfs|]
+        outCodeLine' [qc|            {vecWrite} vec arrOfs 0|]
+        outCodeLine' [qc|            {vecWrite} vec (arrOfs + 1) 0|]
+        outCodeLine' [qc|            return (arrOfs + 2, strOfs)|]
+        outCodeLine' [qc|inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser|]
+        outCodeLine' [qc|inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser|]
         --outCodeLine' [qc|inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)|]
         outCodeLine' [qc|inManyTags' hasAttrs tag arrOfs strOfs inParser = do|]
         outCodeLine' [qc|    (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \next (cnt, arrOfs', strOfs') ->|]
-        outCodeLine' [qc|        inOneTag' hasAttrs tag strOfs' (inParser arrOfs') >>= \case|]
+        outCodeLine' [qc|        inOneTag' hasAttrs tag arrOfs' strOfs' inParser >>= \case|]
         outCodeLine' [qc|            Just (arrOfs'', strOfs'') -> next   (cnt + 1, arrOfs'', strOfs'')|]
         outCodeLine' [qc|            Nothing                   -> do|]
         outCodeLine' [qc|                updateFarthest tag strOfs|]
         outCodeLine' [qc|                return (cnt,     arrOfs', strOfs')|]
         outCodeLine' [qc|    {vecWrite} vec arrOfs cnt|]
         outCodeLine' [qc|    return (endArrOfs, endStrOfs)|]
+        outCodeLine' [qc|inManyTagsWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do|]
+        outCodeLine' [qc|    (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \next (cnt, arrOfs', strOfs') ->|]
+        outCodeLine' [qc|        inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \case|]
+        outCodeLine' [qc|            Just (arrOfs'', strOfs'') -> next   (cnt + 1, arrOfs'', strOfs'')|]
+        outCodeLine' [qc|            Nothing                   -> do|]
+        outCodeLine' [qc|                updateFarthest tag strOfs|]
+        outCodeLine' [qc|                return (cnt,     arrOfs', strOfs')|]
+        outCodeLine' [qc|    {vecWrite} vec arrOfs cnt|]
+        outCodeLine' [qc|    return (endArrOfs, endStrOfs)|]
+
         -- ~~~~~~~~
         -- возвращает вторым параметром True если перед закрытием тега идет '/'
         outCodeLine' [qc|ensureTag True expectedTag ofs|]
@@ -340,7 +358,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|      ofsAttrContent = ofs1 + BS.length attrName + 2|]
         outCodeLine' [qc|    attrContentEnd <- parseAttrContent (attrRouting arrOfs attrName) ofsAttrContent|]
         outCodeLine' [qc|    parseAttributes attrRouting (attrContentEnd + 1) arrOfs|]
-        outCodeLine' [qc|parseTagWithAttrs attrAlloc attrRouting expectedTag ofs arrOfs|]
+        outCodeLine' [qc|parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs|]
         outCodeLine' [qc|  | expectedTag `BS.isPrefixOf` (BS.drop ofs bs) = do|]
         outCodeLine' [qc|      arrOfsAfterAttrs <- attrAlloc arrOfs|]
         outCodeLine' [qc|      if bs `BSU.unsafeIndex` ofsToEnd == closeTagChar|]
@@ -689,18 +707,14 @@ generateParseElementCall (arrOfs, strOfs) field = do
       hasAttrs = field.typeName.attrs /= NoAttrs
       (allocator :: B.Builder, tagQModifier) =
         if hasAttrs
-        then ([qc|{getAttrsAllocatorName parsedType} {getAttrsRoutingName parsedType} {arrOfs} |], (<> "WithAttrs"))
+        then ([qc|{getAttrsAllocatorName parsedType} {getAttrsRoutingName parsedType} |], (<> "WithAttrs"))
         else ("", identity)
-  let (isUseArrOfs, tagQuantifier::XMLString) = case field.cardinality of
-          RepMaybe -> (True,  "inMaybeTag")
-          RepOnce  -> (False, "inOneTag")
-          _        -> (True,  "inManyTags")
-      (arrOfs1, arrOfs2)::(XMLString,XMLString) =
-          -- if isUseArrOfs then ([qc| {arrOfs}|], "") else ("", [qc| {arrOfs}|])
-          if isUseArrOfs then ([qc| {arrOfs}|], "") else ("", [qc| {arrOfs}|])
+  let tagQuantifier::XMLString = case field.cardinality of
+          RepMaybe -> "inMaybeTag"
+          RepOnce  -> "inOneTag"
+          _        -> "inManyTags"
       tagName = field.xmlName
-  -- TODO parse with attributes!
-  out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}"{arrOfs1} {strOfs} $ {parserName}{arrOfs2}|]
+  out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}" {arrOfs} {strOfs} {parserName}|]
 
 getAttrsRoutingName :: HaskellTypeName -> XMLString
 getAttrsRoutingName t = [qc|get{bld $ unHaskellTypeName t}AttrOffset|]
@@ -716,7 +730,7 @@ generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((altTag, _cons, type_), altIdx) -> do
       let altParser = getParserNameForType type_.type_
           vecWrite {- | isUnsafe -} = "V.unsafeWrite" :: B.Builder
-      out1 [qc|"{altTag}" -> {vecWrite} vec arrStart {altIdx} >> inOneTag "{altTag}" strStart ({altParser} $ arrStart + 1)|]
+      out1 [qc|"{altTag}" -> {vecWrite} vec arrStart {altIdx} >> inOneTag "{altTag}" (arrStart+1) strStart {altParser}|]
 
 generateChoiceExtractFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
