@@ -292,21 +292,21 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser|]
         outCodeLine' [qc|inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs strOfs inParser|]
         outCodeLine' [qc|inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser >>= \case|]
+        outCodeLine' [qc|    V.unsafeWrite vec arrOfs 1|]
+        outCodeLine' [qc|    inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs + 1) strOfs inParser >>= \case|]
         outCodeLine' [qc|        Just res -> return res|]
         outCodeLine' [qc|        Nothing -> do|]
         outCodeLine' [qc|            updateFarthest tag strOfs|]
         outCodeLine' [qc|            {vecWrite} vec arrOfs 0|]
-        outCodeLine' [qc|            {vecWrite} vec (arrOfs + 1) 0|]
-        outCodeLine' [qc|            return (arrOfs + 2, strOfs)|]
+        outCodeLine' [qc|            return (arrOfs +11, strOfs)|]
         outCodeLine' [qc|inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    inOneTag' hasAttrs tag arrOfs strOfs inParser >>= \case|]
+        outCodeLine' [qc|    V.unsafeWrite vec arrOfs 1|]
+        outCodeLine' [qc|    inOneTag' hasAttrs tag (arrOfs + 1) strOfs inParser >>= \case|]
         outCodeLine' [qc|        Just res -> return res|]
         outCodeLine' [qc|        Nothing -> do|]
         outCodeLine' [qc|            updateFarthest tag strOfs|]
         outCodeLine' [qc|            {vecWrite} vec arrOfs 0|]
-        outCodeLine' [qc|            {vecWrite} vec (arrOfs + 1) 0|]
-        outCodeLine' [qc|            return (arrOfs + 2, strOfs)|]
+        outCodeLine' [qc|            return (arrOfs + 1, strOfs)|]
         outCodeLine' [qc|inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser|]
         outCodeLine' [qc|inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser|]
         --outCodeLine' [qc|inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)|]
@@ -466,8 +466,8 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
         outCodeLine' [qc|    bsofs = arr {index} ofs|]
         outCodeLine' [qc|    bslen = arr {index} (ofs + 1)|]
         outCodeLine' [qc|extractMaybe ofs subextr|]
-        outCodeLine' [qc|  | arr {index} ofs == 0 = (Nothing, ofs + 2)|]
-        outCodeLine' [qc|  | otherwise                     = first Just $ subextr ofs|]
+        outCodeLine' [qc|  | arr {index} ofs == 0 = (Nothing, ofs + 1)|]
+        outCodeLine' [qc|  | otherwise                     = first Just $ subextr (ofs + 1)|]
         outCodeLine' [qc|extractMany ofs subextr = extractMany' (ofs + 1) (arr {index} ofs)|]
         outCodeLine' [qc|  where|]
         outCodeLine' [qc|    extractMany' ofs 0   = ([], ofs)|]
@@ -1036,7 +1036,7 @@ generateModuleHeading ::
 generateModuleHeading GenerateOpts{..} = do
     unless isUnsafe $ outCodeLine "{-# LANGUAGE Safe #-}"
     outCodeLine "{-# LANGUAGE DuplicateRecordFields #-}"
-    outCodeLine "{-# LANGUAGE BlockArguments #-}"
+    outCodeLine "{-# LANGUAGE BlockArguments  #-}"
     -- TODO add codegen to parser
     outCodeLine "{-# LANGUAGE OverloadedStrings #-}"
     outCodeLine "{-# LANGUAGE RankNTypes #-}"
