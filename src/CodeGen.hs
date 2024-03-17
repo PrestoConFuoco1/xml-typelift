@@ -54,6 +54,7 @@ import Identifiers (normalizeFieldName, normalizeTypeName)
 import Data.Foldable (for_)
 import TypeDecls1 (TypeDecl (..), SumType)
 import qualified Data.List.NonEmpty as NE
+import Text.Pretty.Simple ()
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -195,7 +196,8 @@ generateParserInternalArray1 :: GenerateOpts -> Schema -> CG ()
 generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
     outCodeLine [qc|-- PARSER --|]
     -- FIXME: examine which element is on the toplevel, if there are many
-    when (length tops /= 1) $ error "Only one element supported on toplevel."
+    when (length tops /= 1) $
+      error $ "Only one element supported on toplevel: " <> show (map eName tops)
     let topEl = head tops
     -- Generate parser header
     let topTag = eName topEl
@@ -929,8 +931,8 @@ processType (normalizeTypeName -> possibleName) = \case
       registerEnumGI enum_
       pure $ typeNoAttrs typeName
     Pattern{} -> processAsNewtype base
-    _ -> processAsNewtype base
-  _ -> error "not ref and complex, not supported"
+    None -> processAsNewtype base
+  t -> error $ "not ref and complex, not supported: " <> show t
   where
   processAsNewtype base = do
       typeName <- getUniqueTypeName possibleName
