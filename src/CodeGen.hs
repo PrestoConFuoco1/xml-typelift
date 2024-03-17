@@ -834,11 +834,16 @@ getUniqueName mk possibleName getSet = do
       possibleName : map ((possibleName <>) . cs . show) [1..100::Int]
 
 getUniqueTypeName :: XMLString -> CG HaskellTypeName
-getUniqueTypeName s =
-  getUniqueName mkHaskellTypeName s getAllocatedHaskellTypes
+getUniqueTypeName s = do
+  res <- getUniqueName mkHaskellTypeName s getAllocatedHaskellTypes
+  allocatedHaskellTypes %= Set.insert res
+  pure res
 
 getUniqueConsName :: XMLString -> CG HaskellConsName
-getUniqueConsName s = getUniqueName mkHaskellConsName s getAllocatedHaskellConstructors
+getUniqueConsName s = do
+  res <- getUniqueName mkHaskellConsName s getAllocatedHaskellConstructors
+  allocatedHaskellConses %= Set.insert res
+  pure res
 
 processComplex ::
   XMLString -> -- ^ possible name
@@ -1031,6 +1036,7 @@ generateModuleHeading ::
 generateModuleHeading GenerateOpts{..} = do
     unless isUnsafe $ outCodeLine "{-# LANGUAGE Safe #-}"
     outCodeLine "{-# LANGUAGE DuplicateRecordFields #-}"
+    outCodeLine "{-# LANGUAGE BlockArguments #-}"
     -- TODO add codegen to parser
     outCodeLine "{-# LANGUAGE OverloadedStrings #-}"
     outCodeLine "{-# LANGUAGE RankNTypes #-}"
