@@ -14,6 +14,7 @@
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE ViewPatterns               #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Monad for code generation:
 --   Mostly deals with keeping track of all
 --   generated code as "Builder",
@@ -75,6 +76,7 @@ module CodeGenMonad(-- Code generation monad
                    ,NewtypeGI(..)
                    ,Repeatedness (..)
                    ,FieldGI (..)
+                   ,ContentWithAttrsGI (..)
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -147,7 +149,7 @@ data TypeWithAttrs = TypeWithAttrs
   , attrs :: AttributesInfo
   , giType :: GIType
   }
-
+  deriving stock (Show)
 
 data AttributesInfo
   = NoAttrs
@@ -161,10 +163,20 @@ typeNoAttrs t = TypeWithAttrs t NoAttrs
 
 data GIType
   = GBaseType
+  | GAttrContent ContentWithAttrsGI
   | GSeq SequenceGI
   | GChoice ChoiceGI
   | GEnum EnumGI
   | GWrapper NewtypeGI
+  deriving stock (Show)
+
+data ContentWithAttrsGI = ContentWithAttrsGI
+  { typeName :: HaskellTypeName
+  , consName :: HaskellConsName
+  , attributes :: [FieldGI]
+  , contentType :: HaskellTypeName
+  }
+  deriving stock (Show)
 
 -- GI stands for "generating input"
 -- type for processing sequence inside complexType
@@ -174,11 +186,13 @@ data SequenceGI = SequenceGI
   , attributes :: [FieldGI]
   , fields :: [FieldGI]
   }
+  deriving stock (Show)
 
 data ChoiceGI = ChoiceGI
   { typeName :: HaskellTypeName
   , alts :: [(XMLString, HaskellConsName, TypeWithAttrs)]
   }
+  deriving stock (Show)
 
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
@@ -186,17 +200,20 @@ data FieldGI = FieldGI
   , cardinality :: Repeatedness
   , typeName :: TypeWithAttrs
   }
+  deriving stock (Show)
 
 data EnumGI = EnumGI
   { typeName :: HaskellTypeName
   , constrs :: [(XMLString, HaskellConsName)]
   }
+  deriving stock (Show)
 
 data NewtypeGI = NewtypeGI
   { typeName :: HaskellTypeName
   , consName :: HaskellConsName
   , wrappedType :: TypeWithAttrs
   }
+  deriving stock (Show)
  
 data Repeatedness = RepMaybe
                   | RepOnce

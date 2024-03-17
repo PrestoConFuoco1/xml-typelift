@@ -47,6 +47,7 @@ basePrologue isUnsafe = (mconcat $ map makeImport modules) <> "\n" <> mconcat ba
               ,"Control.Monad.ST"
               ,"qualified Data.STRef as STRef"
               ,"Data.ByteString (ByteString)"
+              ,"Debug.Trace"
               -- ,"Data.Char"
               ,"Data.Functor.Identity"
               ,"Data.Time.Format"

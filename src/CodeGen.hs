@@ -55,6 +55,7 @@ import Data.Foldable (for_)
 import TypeDecls1 (TypeDecl (..), SumType)
 import qualified Data.List.NonEmpty as NE
 import Text.Pretty.Simple ()
+import Data.Bifunctor (Bifunctor(..))
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -568,9 +569,17 @@ generateMainFunction GenerateOpts{..} = trace "main" do
             outCodeLine' [qc|([], filenames) -> parseAndPrintFiles False filenames|]
             outCodeLine' [qc|(_,  filenames) -> parseAndPrintFiles True  filenames|]
         outCodeLine' "exitSuccess"
+    outCodeLine' ""
+    outCodeLine' [qc|echo :: Show a => String -> a -> a|]
+    outCodeLine' [qc|echo msg x = (msg <> ": "<> show x) `trace` x |]
 
 getSequenceAttrs :: SequenceGI -> AttributesInfo
 getSequenceAttrs s = case NE.nonEmpty $ map (.xmlName) s.attributes of
+  Nothing -> NoAttrs
+  Just a -> AttributesInfo a
+
+getExtContentAttrs :: ContentWithAttrsGI -> AttributesInfo
+getExtContentAttrs c = case NE.nonEmpty $ map (.xmlName) c.attributes of
   Nothing -> NoAttrs
   Just a -> AttributesInfo a
 
@@ -586,6 +595,26 @@ mkSequenceTypeDeclaration s =
   (TyData $ B.byteString s.typeName.unHaskellTypeName
   , [(TyCon $ B.byteString s.consName.unHaskellConsName, map mkFieldDeclaration $ s.attributes <> s.fields)]
   )
+
+mkAttrContentTypeDeclaration :: ContentWithAttrsGI -> (TyData, [Record])
+mkAttrContentTypeDeclaration cgi =
+  ( TyData $ B.byteString cgi.typeName.unHaskellTypeName
+  , [ ( TyCon $ B.byteString cgi.consName.unHaskellConsName
+      , map mkFieldDeclaration $ cgi.attributes <> [contentField]
+      )
+    ]
+  )
+  where
+  contentField :: FieldGI
+  contentField =
+    -- TODO: maybe it's not the best idea to use FieldGI here
+    FieldGI
+      { haskellName = "content"
+      , xmlName = "abra-schwabra-kadabra" -- should be never used
+      , cardinality = RepOnce
+      , typeName = typeNoAttrs cgi.contentType GBaseType
+      }
+
 
 mkFieldDeclaration :: FieldGI -> TyField
 mkFieldDeclaration fld =
@@ -634,9 +663,16 @@ getParserNameForType type_ =
 bld :: XMLString -> B.Builder
 bld = B.byteString
 
+generateAttrContentParse :: ContentWithAttrsGI -> FunctionBody
+generateAttrContentParse cgi = FunctionBody $ runCodeWriter do
+  generateAttrsAllocation
+    TypeWithAttrs {type_ = cgi.typeName, attrs = getExtContentAttrs cgi, giType = GAttrContent cgi}
+  out1 (getParserNameForType cgi.typeName <> " = " <> getParserNameForType cgi.contentType)
+
 generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
-  generateAttrsAllocation TypeWithAttrs { type_ = s.typeName, attrs = getSequenceAttrs s }
+  generateAttrsAllocation
+    TypeWithAttrs { type_ = s.typeName, attrs = getSequenceAttrs s, giType = GSeq s }
   out1 (getParserNameForType s.typeName <> " arrStart strStart = do")
   withIndent1 do
     let (arrStart, strStart) = ("arrStart", "strStart")
@@ -718,6 +754,22 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
           typeBld = bld type_.type_.unHaskellTypeName
       out1 [qc|{altIdx} -> first {consBld} $ extract{typeBld}Content (ofs + 1)|]
 
+generateAttrContentExtract :: ContentWithAttrsGI -> FunctionBody
+generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
+  let recType = bld cgi.typeName.unHaskellTypeName
+  let baseType = bld cgi.contentType.unHaskellTypeName
+  let attrNum = length cgi.attributes
+  let consName = bld cgi.consName.unHaskellConsName
+  out1 [qc|extract{recType}Content ofs =|]
+  withIndent1 $ do
+    forM_ (zip cgi.attributes [1..attrNum]) $ \(attr, aIdx) -> do
+        let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
+        let haskellAttrName = attr.haskellName.unHaskellFieldName
+        let haskellTypeName = bld attr.typeName.type_.unHaskellTypeName
+        out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractMaybe {oldOfs} extract{haskellTypeName}Content in|]
+    out1 [qc|let (content, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
+    out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
+
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
   let recType = bld s.typeName.unHaskellTypeName
@@ -781,8 +833,14 @@ registerParseFunction fBody = parseFunctions %= (fBody :)
 registerSequenceGI :: SequenceGI -> CG ()
 registerSequenceGI s = do
   registerDataDeclaration $ Alg $ mkSequenceTypeDeclaration s
-  registerExtractionFunction $ generateSequenceExtractFunctionBody s
   registerParseFunction $ generateSequenceParseFunctionBody s
+  registerExtractionFunction $ generateSequenceExtractFunctionBody s
+
+registerAttrContent :: ContentWithAttrsGI -> CG ()
+registerAttrContent cgi = do
+  registerDataDeclaration $ Alg $ mkAttrContentTypeDeclaration cgi
+  registerParseFunction $ generateAttrContentParse cgi
+  registerExtractionFunction $ generateAttrContentExtract cgi
 
 registerChoiceGI :: ChoiceGI -> CG ()
 registerChoiceGI chGI = do
@@ -858,15 +916,6 @@ processComplex (normalizeTypeName -> possibleName) _mixed attrs inner = case inn
       , attributes = attrFields
       , fields
       }
-  attributeToField :: Attr -> CG FieldGI
-  attributeToField attr = do
-    typeName <- processType (aName attr) $ aType attr
-    pure FieldGI
-      { haskellName = attrNameToHaskellFieldName $ aName attr
-      , xmlName = aName attr
-      , cardinality = RepMaybe
-      , typeName
-      }
   elementToField :: Element -> CG FieldGI
   elementToField elt = do
     typeName <- processType (eName elt) $ eType elt
@@ -879,6 +928,16 @@ processComplex (normalizeTypeName -> possibleName) _mixed attrs inner = case inn
   getElement :: TyPart -> Maybe Element
   getElement (Elt e) = Just e
   getElement _ = Nothing
+
+attributeToField :: Attr -> CG FieldGI
+attributeToField attr = do
+  typeName <- processType (aName attr) $ aType attr
+  pure FieldGI
+    { haskellName = attrNameToHaskellFieldName $ aName attr
+    , xmlName = aName attr
+    , cardinality = RepMaybe
+    , typeName
+    }
 
 eltNameToHaskellFieldName :: BS.ByteString -> HaskellFieldName
 eltNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
@@ -902,7 +961,16 @@ processType (normalizeTypeName -> possibleName) = \case
       pure $ typeNoAttrs typeName $ GEnum enum_
     Pattern{} -> processAsNewtype base
     None -> processAsNewtype base
-  t -> error $ "not ref and complex, not supported: " <> show t
+  Extension{base, mixin} -> do
+    baseHType <- lookupHaskellTypeBySchemaType base
+    (hType, extGI) <- mkExtendedGI mixin possibleName baseHType.type_ baseHType.giType
+    registerGI extGI
+    pure $ TypeWithAttrs
+      { type_ = hType
+      , attrs = attrInfoFromGIType extGI
+      , giType = extGI
+      }
+  -- t -> error $ "not ref and complex, not supported: " <> show t
   where
   processAsNewtype base = do
       typeName <- getUniqueTypeName possibleName
@@ -911,6 +979,49 @@ processType (normalizeTypeName -> possibleName) = \case
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
       pure $ typeNoAttrs typeName $ GWrapper ngi
+
+attrInfoFromGIType :: GIType -> AttributesInfo
+attrInfoFromGIType = \case
+  GBaseType -> NoAttrs
+  GAttrContent cgi -> getExtContentAttrs cgi
+  GSeq seq_ -> getSequenceAttrs seq_
+  GChoice _ch -> NoAttrs
+  GEnum _en -> NoAttrs
+  GWrapper _nwt -> NoAttrs
+
+mkExtendedGI :: Type -> XMLString -> HaskellTypeName -> GIType -> CG (HaskellTypeName, GIType)
+mkExtendedGI mixin possibleName baseType gi = case gi of
+  _x
+    | isSimpleContentType gi, Just attrs <- mbAttrsExtension ->
+      second GAttrContent <$> addAttrsToSimple attrs
+  _ -> error $ "can't extend type " <> show gi <> " and mixin " <> show mixin
+  where
+  isSimpleContentType = \case
+    GBaseType -> True
+    GWrapper{} -> True
+    GEnum{} -> True
+    _ -> False
+   
+  addAttrsToSimple ::
+    NE.NonEmpty Attr ->
+    CG (HaskellTypeName, ContentWithAttrsGI)
+  addAttrsToSimple attrs = do
+    typeName <- getUniqueTypeName possibleName
+    consName <- getUniqueConsName possibleName
+    attrFields <- mapM attributeToField attrs
+    pure $ (typeName,) ContentWithAttrsGI
+      { typeName
+      , consName
+      , attributes = NE.toList attrFields
+      , contentType = baseType
+      }
+
+  mbAttrsExtension :: Maybe (NE.NonEmpty Attr)
+  mbAttrsExtension = case mixin of
+    Complex{attrs, inner} -> do
+      guard $ inner == Seq []
+      NE.nonEmpty attrs
+    _ -> Nothing
 
 mkEnumTypeDeclaration :: EnumGI -> (TyData, [Record])
 mkEnumTypeDeclaration en =
@@ -957,6 +1068,15 @@ generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
       let conBld = bld haskellCon.unHaskellConsName
       out1 [qc|"{bld xmlName}" -> {conBld}|]
     out1 [qc|) $ extractStringContent ofs|]
+
+registerGI :: GIType -> CG ()
+registerGI = \case
+  GBaseType -> pure ()
+  GAttrContent cgi -> registerAttrContent cgi
+  GSeq seq_ -> registerSequenceGI seq_
+  GChoice ch -> registerChoiceGI ch
+  GEnum en -> registerEnumGI en
+  GWrapper nwt -> registerNewtypeGI nwt
 
 registerEnumGI :: EnumGI -> CG ()
 registerEnumGI e = do
@@ -1014,3 +1134,5 @@ generateModuleHeading GenerateOpts{..} = do
 
 identity :: p -> p
 identity x = x
+
+
