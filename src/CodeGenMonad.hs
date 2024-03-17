@@ -68,6 +68,13 @@ module CodeGenMonad(-- Code generation monad
                    ,TypeWithAttrs(..)
                    ,AttributesInfo(..)
                    ,typeNoAttrs
+                   ,GIType (..)
+                   ,SequenceGI(..)
+                   ,ChoiceGI(..)
+                   ,EnumGI(..)
+                   ,NewtypeGI(..)
+                   ,Repeatedness (..)
+                   ,FieldGI (..)
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -138,6 +145,7 @@ newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
 data TypeWithAttrs = TypeWithAttrs
   { type_ :: HaskellTypeName
   , attrs :: AttributesInfo
+  , giType :: GIType
   }
 
 
@@ -148,8 +156,54 @@ data AttributesInfo
     }
   deriving stock (Eq, Show)
 
-typeNoAttrs :: HaskellTypeName -> TypeWithAttrs
+typeNoAttrs :: HaskellTypeName -> GIType -> TypeWithAttrs
 typeNoAttrs t = TypeWithAttrs t NoAttrs
+
+data GIType
+  = GBaseType
+  | GSeq SequenceGI
+  | GChoice ChoiceGI
+  | GEnum EnumGI
+  | GWrapper NewtypeGI
+
+-- GI stands for "generating input"
+-- type for processing sequence inside complexType
+data SequenceGI = SequenceGI
+  { typeName :: HaskellTypeName
+  , consName :: HaskellConsName
+  , attributes :: [FieldGI]
+  , fields :: [FieldGI]
+  }
+
+data ChoiceGI = ChoiceGI
+  { typeName :: HaskellTypeName
+  , alts :: [(XMLString, HaskellConsName, TypeWithAttrs)]
+  }
+
+data FieldGI = FieldGI
+  { haskellName :: HaskellFieldName
+  , xmlName :: XMLString
+  , cardinality :: Repeatedness
+  , typeName :: TypeWithAttrs
+  }
+
+data EnumGI = EnumGI
+  { typeName :: HaskellTypeName
+  , constrs :: [(XMLString, HaskellConsName)]
+  }
+
+data NewtypeGI = NewtypeGI
+  { typeName :: HaskellTypeName
+  , consName :: HaskellConsName
+  , wrappedType :: TypeWithAttrs
+  }
+ 
+data Repeatedness = RepMaybe
+                  | RepOnce
+                  | RepMany
+                  | RepNotLess Int
+                  | RepRange Int Int
+                  deriving Show
 
 -- | State of code generator
 data CGState =
@@ -212,7 +266,7 @@ initialState :: CGState
 initialState  = CGState
                (Set.fromList $ map (HaskellTypeName . snd) baseTranslations)
                (Set.fromList $ map (HaskellConsName . snd) baseTranslations)
-               (Map.fromList $ map (second $ typeNoAttrs . HaskellTypeName) baseTranslations)
+               (Map.fromList $ map (second $ flip typeNoAttrs GBaseType . HaskellTypeName) baseTranslations)
                []
                []
                []

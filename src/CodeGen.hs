@@ -173,15 +173,6 @@ generateParserInternalStructures = do
     outCodeLine [qc|data TopLevelInternal = TopLevelInternal !ByteString !(V.Vector Int) deriving (G.Generic, NFData, Show)|] -- TODO qualify all imports to avoid name clush
     outCodeLine ""
 
-
-data Repeatedness = RepMaybe
-                  | RepOnce
-                  | RepMany
-                  | RepNotLess Int
-                  | RepRange Int Int
-                  deriving Show
-
-
 eltToRepeatedness :: Element -> Repeatedness
 eltToRepeatedness (Element 0 Unbounded     _ _ _) = RepMany
 eltToRepeatedness (Element 0 (MaxOccurs 1) _ _ _) = RepMaybe
@@ -578,24 +569,10 @@ generateMainFunction GenerateOpts{..} = trace "main" do
             outCodeLine' [qc|(_,  filenames) -> parseAndPrintFiles True  filenames|]
         outCodeLine' "exitSuccess"
 
--- GI stands for "generating input"
--- type for processing sequence inside complexType
-data SequenceGI = SequenceGI
-  { typeName :: HaskellTypeName
-  , consName :: HaskellConsName
-  , attributes :: [FieldGI]
-  , fields :: [FieldGI]
-  }
-
 getSequenceAttrs :: SequenceGI -> AttributesInfo
 getSequenceAttrs s = case NE.nonEmpty $ map (.xmlName) s.attributes of
   Nothing -> NoAttrs
   Just a -> AttributesInfo a
-
-data ChoiceGI = ChoiceGI
-  { typeName :: HaskellTypeName
-  , alts :: [(XMLString, HaskellConsName, TypeWithAttrs)]
-  }
 
 mkChoiceTypeDeclaration :: ChoiceGI -> SumType
 mkChoiceTypeDeclaration ch =
@@ -603,13 +580,6 @@ mkChoiceTypeDeclaration ch =
   , flip map ch.alts \(_eltName, cons_, conType) -> do
     (TyCon $ bld cons_.unHaskellConsName, TyType $ bld conType.type_.unHaskellTypeName)
   )
-
-data FieldGI = FieldGI
-  { haskellName :: HaskellFieldName
-  , xmlName :: XMLString
-  , cardinality :: Repeatedness
-  , typeName :: TypeWithAttrs
-  }
 
 mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
 mkSequenceTypeDeclaration s =
@@ -634,9 +604,9 @@ exampleSequenceGI = SequenceGI
   , consName = "TestCons"
   , attributes = []
   , fields =
-    [ FieldGI "departure" "departureElt" RepMaybe $ typeNoAttrs "String"
-    , FieldGI "arrival" "arrivalElt" RepOnce $ typeNoAttrs "Int"
-    , FieldGI "techStops" "techStopsElt" RepMany $ typeNoAttrs "TechStop"
+    [ FieldGI "departure" "departureElt" RepMaybe $ typeNoAttrs "String" GBaseType
+    , FieldGI "arrival" "arrivalElt" RepOnce $ typeNoAttrs "Int" GBaseType
+    , FieldGI "techStops" "techStopsElt" RepMany $ typeNoAttrs "TechStop" GBaseType
     ]
   }
 
@@ -859,13 +829,13 @@ processComplex (normalizeTypeName -> possibleName) _mixed attrs inner = case inn
     Just elts -> do
       sGI <- mkSequenceGI elts
       registerSequenceGI sGI
-      pure $ TypeWithAttrs sGI.typeName $ getSequenceAttrs sGI
+      pure $ TypeWithAttrs sGI.typeName (getSequenceAttrs sGI) $ GSeq sGI
   Choice choiceAlts -> case traverse getElement choiceAlts of
     Nothing -> error "only choice between elements is supported"
     Just elts -> do
       chGI <- mkChoiceGI elts
       registerChoiceGI chGI
-      pure $ typeNoAttrs chGI.typeName
+      pure $ typeNoAttrs chGI.typeName $ GChoice chGI
   _ -> error "anything other than Seq inside Complex is not supported"
   where
   mkChoiceGI :: [Element] -> CG ChoiceGI
@@ -929,7 +899,7 @@ processType (normalizeTypeName -> possibleName) = \case
       let
         enum_ = EnumGI {typeName, constrs}
       registerEnumGI enum_
-      pure $ typeNoAttrs typeName
+      pure $ typeNoAttrs typeName $ GEnum enum_
     Pattern{} -> processAsNewtype base
     None -> processAsNewtype base
   t -> error $ "not ref and complex, not supported: " <> show t
@@ -940,13 +910,7 @@ processType (normalizeTypeName -> possibleName) = \case
       wrappedType <- lookupHaskellTypeBySchemaType base
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
-      pure $ typeNoAttrs typeName
-
-
-data EnumGI = EnumGI
-  { typeName :: HaskellTypeName
-  , constrs :: [(XMLString, HaskellConsName)]
-  }
+      pure $ typeNoAttrs typeName $ GWrapper ngi
 
 mkEnumTypeDeclaration :: EnumGI -> (TyData, [Record])
 mkEnumTypeDeclaration en =
@@ -954,12 +918,7 @@ mkEnumTypeDeclaration en =
   , (\con -> (TyCon $ B.byteString (snd con).unHaskellConsName, [])) <$> en.constrs
   )
 
-data NewtypeGI = NewtypeGI
-  { typeName :: HaskellTypeName
-  , consName :: HaskellConsName
-  , wrappedType :: TypeWithAttrs
-  }
- 
+
 mkNewtypeDeclaration :: NewtypeGI -> (TyData, TyCon, TyType)
 mkNewtypeDeclaration ngi =
   ( TyData $ B.byteString ngi.typeName.unHaskellTypeName
