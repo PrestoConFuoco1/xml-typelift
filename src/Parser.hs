@@ -31,6 +31,7 @@ import           Xeno.Errors as Xeno
 import           Schema
 import           Errors
 import           FromXML
+import qualified Data.List as List
 
 -- * These are internal types used only for convenient class definition.
 --   Should not be exposed, but rather Schema types should be.
@@ -198,7 +199,7 @@ schemaAttr sch attr@(aName, aVal) =
     (_,       "attributeFormDefault") -> return sch
     (_,       "xmlns"               ) -> return sch
     (_,       "lang"                ) -> return sch
-    ("xmlns", _                     ) -> return sch
+    ("xmlns", qual                  ) -> return sch { quals = SchemaQualificator aVal qual : quals sch}
     _                                 -> unknownAttrHandler "schema" attr
 
 schemaElt :: ChildHandler Schema
@@ -212,7 +213,13 @@ schemaElt sch nod =
       "key"         -> return sch
       "unique"      -> return sch
       "keyref"      -> return sch
-      _ -> return sch -- unknownChildHandler elt val
+      "import" -> do
+        let attrs = attributes nod
+        namespace <- maybe (error "import with no namespace") pure $ List.lookup "namespace" attrs
+        schemaLocation <- maybe (error "import with no namespace") pure $ List.lookup "schemaLocation" attrs
+        return sch { imports = SchemaImport namespace schemaLocation : imports sch}
+      -- _ -> return sch -- unknownChildHandler elt val
+      _ -> error $ show $ nodeName nod -- unknownChildHandler elt val
   where
     handleType = do
       TypeDesc label ty <- fromXML nod

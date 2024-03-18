@@ -24,16 +24,30 @@ class Default a where
 
 type TypeDict = Map XMLString Type
 
+data SchemaQualificator = SchemaQualificator
+  { name :: XMLString
+  , qual :: XMLString
+  }
+  deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
+
+data SchemaImport = SchemaImport
+  { namespace :: XMLString
+  , schemaLocation :: XMLString
+  }
+  deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
+
 -- | Top level XML Schema
-data Schema = Schema {
-    types     :: !TypeDict  -- ^ Types defined by name
+data Schema = Schema
+  { quals     :: ![SchemaQualificator]
+  , imports   :: ![SchemaImport]
+  , types     :: !TypeDict  -- ^ Types defined by name
   , tops      :: ![Element] -- ^ Possible top level elements
   , namespace :: !XMLString -- ^ Default namespace
   }
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 instance Default Schema where
-  def = Schema Data.Map.empty [] ""
+  def = Schema [] [] Data.Map.empty [] ""
 
 newtype ID = ID XMLString
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
