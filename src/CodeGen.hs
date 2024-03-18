@@ -462,6 +462,9 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
         outCodeLine' [qc|extractMaybe ofs subextr|]
         outCodeLine' [qc|  | arr {index} ofs == 0 = (Nothing, ofs + 1)|]
         outCodeLine' [qc|  | otherwise                     = first Just $ subextr (ofs + 1)|]
+        outCodeLine' [qc|extractAttribute ofs subextr|]
+        outCodeLine' [qc|  | arr `V.unsafeIndex` ofs == 0 = (Nothing, ofs + 2)|]
+        outCodeLine' [qc|  | otherwise                     = first Just $ subextr ofs|]
         outCodeLine' [qc|extractMany ofs subextr = extractMany' (ofs + 1) (arr {index} ofs)|]
         outCodeLine' [qc|  where|]
         outCodeLine' [qc|    extractMany' ofs 0   = ([], ofs)|]
@@ -766,7 +769,7 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
         let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
         let haskellAttrName = attr.haskellName.unHaskellFieldName
         let haskellTypeName = bld attr.typeName.type_.unHaskellTypeName
-        out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractMaybe {oldOfs} extract{haskellTypeName}Content in|]
+        out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
     out1 [qc|let (content, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
 
@@ -780,7 +783,7 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
           let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
           let haskellAttrName = attr.haskellName.unHaskellFieldName
           let haskellTypeName = bld attr.typeName.type_.unHaskellTypeName
-          out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractMaybe {oldOfs} extract{haskellTypeName}Content in|]
+          out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
           return haskellAttrName
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
