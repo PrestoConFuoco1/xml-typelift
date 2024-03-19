@@ -88,7 +88,7 @@ basePrologue isUnsafe = (mconcat $ map makeImport modules) <> "\n" <> mconcat ba
     baseTypes = ["type XMLString = ByteString"]
 
 baseTranslations :: [(BS.ByteString, BS.ByteString)]
-baseTranslations = map addNS
+baseTranslations =
     [("any"            , "Xeno.Node"    )
     ,("string"         , "XMLString"    )
     ,("boolean"        , "Bool"         )

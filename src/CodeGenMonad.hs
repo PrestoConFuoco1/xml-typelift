@@ -77,6 +77,7 @@ module CodeGenMonad(-- Code generation monad
                    ,Repeatedness (..)
                    ,FieldGI (..)
                    ,ContentWithAttrsGI (..)
+                   ,knownBaseTypes
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -96,7 +97,7 @@ import           Data.Semigroup((<>))
 #endif
 
 import           BaseTypes
-import           FromXML                  (XMLString)
+import           FromXML                  (XMLString, splitNS)
 import           Identifiers
 import           Schema
 import TypeDecls1
@@ -134,13 +135,13 @@ newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString
 newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
   deriving newtype (Eq, Ord, Show, IsString)
 mkHaskellTypeName :: XMLString -> HaskellTypeName
-mkHaskellTypeName = HaskellTypeName . normalizeTypeName
+mkHaskellTypeName = HaskellTypeName . normalizeTypeName . snd . splitNS
 
 newtype HaskellConsName = HaskellConsName {unHaskellConsName :: BS.ByteString}
   deriving newtype (Eq, Ord, Show, IsString)
 
 mkHaskellConsName :: BS.ByteString -> HaskellConsName
-mkHaskellConsName = HaskellConsName . normalizeTypeName
+mkHaskellConsName = HaskellConsName . normalizeTypeName . snd . splitNS
 
 newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
 
@@ -227,12 +228,13 @@ data CGState =
   CGState {
     _allocatedHaskellTypes :: Set.Set HaskellTypeName
   , _allocatedHaskellConses :: Set.Set HaskellConsName
-  , _knownTypes :: Map.Map XMLString TypeWithAttrs
+  , _knownTypes :: Map.Map XMLString [(Namespace, TypeWithAttrs)]
   , _typeDecls :: [TypeDecl]
   , _parseFunctions :: [FunctionBody]
   , _extractFunctions :: [FunctionBody]
   , _processedSchemaTypes :: Set.Set XMLString
-  , _schemaTypesMap :: Map.Map XMLString Type
+  -- , _schemaTypesMap :: Map.Map XMLString Type
+  , _schemaTypesMap :: Map.Map XMLString [(Namespace, (Type, QualNamespace))]
 
   -- FOR GENERATING
   , _indent               :: Int
@@ -279,11 +281,18 @@ instance RWS.MonadReader Schema CG where
 instance MonadFail CG where
     fail = RWS.fail
 
+defaultNamespace :: Namespace
+defaultNamespace = Namespace "http://www.w3.org/2001/XMLSchema"
+
+
+knownBaseTypes :: Map.Map BS.ByteString TypeWithAttrs
+knownBaseTypes = Map.fromList $ map (second $ flip typeNoAttrs GBaseType . HaskellTypeName) baseTranslations
+
 initialState :: CGState
 initialState  = CGState
                (Set.fromList $ map (HaskellTypeName . snd) baseTranslations)
                (Set.fromList $ map (HaskellConsName . snd) baseTranslations)
-               (Map.fromList $ map (second $ flip typeNoAttrs GBaseType . HaskellTypeName) baseTranslations)
+               (Map.fromList $ map (second $ (:[]) . (defaultNamespace,) .  flip typeNoAttrs GBaseType . HaskellTypeName) baseTranslations)
                []
                []
                []

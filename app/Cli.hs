@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE LambdaCase          #-}

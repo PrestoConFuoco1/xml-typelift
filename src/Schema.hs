@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveDataTypeable  #-}
 {-# LANGUAGE DeriveGeneric       #-}
@@ -15,10 +15,13 @@ import           Prelude                     hiding (id)
 --import Data.Set as Set
 import           Data.Data
 import           Data.Generics.Uniplate.Data ()
-import           Data.Map
 import           GHC.Generics
 
 import           FromXML                     (XMLString)
+import qualified Data.Map as Map
+import qualified Data.List as List
+import Control.Monad (forM)
+import Data.Maybe (fromMaybe)
 
 class Default a where
   def :: a
@@ -27,9 +30,19 @@ newtype Qual = Qual {unQual :: XMLString}
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 newtype Namespace = Namespace {unNamespace :: XMLString}
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
-type QualNamespace = Map Qual Namespace
-type TypeDict = Map XMLString Type
-type TypeDict1 = Map XMLString [(Namespace, (Type, QualNamespace))]
+type QualNamespace = Map.Map Qual Namespace
+type TypeDict = Map.Map XMLString Type
+type TypeDict1 = Map.Map XMLString [(Namespace, (Type, QualNamespace))]
+
+getSchemaQualNamespace :: Schema -> QualNamespace
+getSchemaQualNamespace schema = do
+  let
+    importedSchemas = flip map (imports schema) $ \import_ -> do
+      (,import_) $ fromMaybe
+          (error "import with no qualification")
+          (List.find (\p -> impNamespace import_  == name p) (quals schema))
+  Map.fromList $ flip map importedSchemas $ \(q, _) -> do
+          (qual q, Namespace $ name q)
 
 
 data SchemaQualificator = SchemaQualificator
@@ -56,7 +69,7 @@ data Schema = Schema
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 instance Default Schema where
-  def = Schema [] [] Data.Map.empty Data.Map.empty [] ""
+  def = Schema [] [] Map.empty Map.empty [] ""
 
 newtype ID = ID XMLString
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
