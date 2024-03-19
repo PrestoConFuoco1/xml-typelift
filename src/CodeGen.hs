@@ -822,6 +822,8 @@ lookupHaskellTypeBySchemaType quals xmlType =
  Nothing -> do
   knownTypes_ <- Lens.use knownTypes
   schemaTypes <- Lens.use schemaTypesMap
+  let withTypeNotFoundErr :: Maybe c -> c
+      withTypeNotFoundErr = withTypeNotFoundErr' knownTypes_ schemaTypes
   let mbNamespace = do
         guard $ not $ BS.null namespaceShort
         Map.lookup (Qual namespaceShort) quals
@@ -845,8 +847,12 @@ lookupHaskellTypeBySchemaType quals xmlType =
         Nothing -> processSchemaNamedType quals_ namespace (xmlType, knownSchType)
         Just x -> pure x
   where
-  withTypeNotFoundErr :: Maybe a -> a
-  withTypeNotFoundErr = fromMaybe $ error $ "type not found: " <> cs xmlType
+  
+  withTypeNotFoundErr' :: (Show a, Show b) => a -> b -> Maybe c -> c
+  withTypeNotFoundErr' knownTypes_ schemaTypes =
+    fromMaybe $ error $ "type not found: " <> cs xmlType <>
+      "\n known haskell types: " <> show knownTypes_ <>
+      "\n known schema types: " <> show schemaTypes
 
 registerDataDeclaration :: TypeDecl -> CG ()
 registerDataDeclaration decl = typeDecls %= (decl :)
