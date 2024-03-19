@@ -263,6 +263,8 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
         outCodeLine' [qc|                    Just (ofs''', _) -> return $ Just (arrOfs, ofs''')|]
         outCodeLine' [qc|            else do|]
         outCodeLine' [qc|                return Nothing|]
+        -- FIXME: поддержка пустых типов данных
+        -- https://stackoverflow.com/questions/7231902/self-closing-tags-in-xml-files
         outCodeLine' [qc|inOneTag' hasAttrs tag arrOfs strOfs inParser = do|]
         outCodeLine' [qc|    let tagOfs = skipToOpenTag strOfs + 1|]
         outCodeLine' [qc|    case ensureTag hasAttrs tag tagOfs of|]
