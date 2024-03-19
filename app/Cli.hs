@@ -49,7 +49,7 @@ data Opts = Opts
     } deriving Show
 
 echo :: Show a => String -> a -> a
-echo msg x = (msg <> ": " <> show x) `trace` x
+echo msg x = {- (msg <> ": " <> show x) `trace`-}  x
 
 processSchemaRec :: FilePath -> IO Schema
 processSchemaRec xmlFilename = do
@@ -81,7 +81,7 @@ processSchema Opts{..} = do
     input <- BS.readFile schemaFilename
     -- schema <- fromMaybe (error "no schema parse") <$> parseSchema input
     schema <- processSchemaRec schemaFilename
-    print $ typesExtended schema
+    -- print $ typesExtended schema
     let (flattened, msgs) = flatten schema
     forM_ msgs $ hPrint stderr
     let (analyzed, schemaErrors) = analyze flattened

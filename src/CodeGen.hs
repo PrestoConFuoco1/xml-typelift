@@ -886,7 +886,7 @@ echo :: Show a => String -> a -> a
 echo msg x = (msg <> ": " <> show x) `trace` x
 
 getUniqueName :: (Monad m, Ord a) => (XMLString -> a) -> XMLString -> m (Set.Set a) -> m a
-getUniqueName mk (snd . splitNS . echo "unique" -> possibleName) getSet = do
+getUniqueName mk (snd . splitNS {-. echo "unique"-} -> possibleName) getSet = do
   set_ <- getSet
   pure $ fromJust $ List.find (flip Set.notMember set_) possibleAlternatives
   where

@@ -159,7 +159,7 @@ reservedWords  = ["do"
                  ]
 
 predefinedTypes :: Set.Set XMLString
-predefinedTypes = Set.fromList $ map fst baseTranslations
+predefinedTypes = Set.fromList $ map (("xs:" <>) . fst) baseTranslations
 
 isXSDBaseType = (`Set.member` predefinedTypes)
 
