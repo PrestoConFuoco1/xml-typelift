@@ -56,17 +56,18 @@ newtype Flattener a =
                         a
   } deriving (Functor, Applicative, Monad)
 
+-- FIXME: we are using typesExtended now, but it's not processed here
 runFlattener ::  Schema                  -- ^ input schema
              -> (Type -> Flattener Type) -- ^ transform function
              -> (Schema, [Message])      -- ^ resulting schema and messages
-runFlattener Schema { types, tops, namespace, quals, imports } act =
+runFlattener Schema { types, tops, namespace, quals, imports, typesExtended } act =
     evalRWS loop ScopeGlobal types
   where
     loop = do
       (unFlattener . flattenType) `mapM_` Map.keys types
       tops'      <- (unFlattener . flattenElt) `mapM` tops
       finalTypes <- get
-      return Schema { types=finalTypes, tops=tops', namespace, quals, imports}
+      return Schema { types=finalTypes, tops=tops', namespace, quals, imports, typesExtended}
       -- TODO: flatten element types
     flattenType :: XMLString -> Flattener ()
     flattenType key =

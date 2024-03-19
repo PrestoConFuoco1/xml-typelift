@@ -199,7 +199,7 @@ schemaAttr sch attr@(aName, aVal) =
     (_,       "attributeFormDefault") -> return sch
     (_,       "xmlns"               ) -> return sch
     (_,       "lang"                ) -> return sch
-    ("xmlns", qual                  ) -> return sch { quals = SchemaQualificator aVal qual : quals sch}
+    ("xmlns", qual                  ) -> return sch { quals = SchemaQualificator aVal (Qual qual) : quals sch}
     _                                 -> unknownAttrHandler "schema" attr
 
 schemaElt :: ChildHandler Schema

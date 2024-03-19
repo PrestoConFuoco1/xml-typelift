@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE LambdaCase          #-}
 {-# LANGUAGE RecordWildCards     #-}
@@ -28,6 +29,13 @@ import           CodeGen
 import           Flatten
 import           Parser
 import           TestUtils
+import Schema (Schema (..), QualNamespace, Namespace (..), qual, name, schemaLocation, impNamespace)
+import qualified Data.List as List
+import qualified Data.Map as Map
+import qualified Data.ByteString.Char8 as BSC
+import Debug.Trace (trace)
+import Data.Functor ((<&>))
+import System.FilePath
 
 
 data Opts = Opts
@@ -39,22 +47,50 @@ data Opts = Opts
     , outputToFile        :: Maybe FilePath
     } deriving Show
 
+echo :: Show a => String -> a -> a
+echo msg x = (msg <> ": " <> show x) `trace` x
+
+processSchemaRec :: FilePath -> IO Schema
+processSchemaRec xmlFilename = do
+  input <- BS.readFile (echo "processed xsd" xmlFilename)
+  (Just schema) <- parseSchema input
+  let currentNamespace = Namespace $ namespace schema
+  importedSchemas <- forM (imports schema) $ \import_ -> do
+      qual <-
+        maybe
+          (error "import with no qualification")
+          pure
+          (List.find (\p -> impNamespace import_  == name p) (quals schema))
+      pure (qual, import_)
+  let qualNamespace :: QualNamespace =
+        Map.fromList $ flip map importedSchemas $ \(q, _) -> do
+          (qual q, Namespace $ name q)
+      currentTypeDict1 =
+        types schema <&> \t -> [(currentNamespace, (t, qualNamespace))]
+  childTypeDicts1 <- forM importedSchemas $ \(_, import_) -> do
+    let schemaFileName = dropFileName xmlFilename </> BSC.unpack (schemaLocation import_)
+    processSchemaRec schemaFileName
+  pure $
+    schema
+    { typesExtended = Map.unionsWith (++) (currentTypeDict1 : map typesExtended childTypeDicts1)
+    }
 
 processSchema :: Opts -> IO ()
 processSchema Opts{..} = do
     input <- BS.readFile schemaFilename
-    parseSchema input >>= (maybe (return ()) $ \schema -> do
-        let (flattened, msgs) = flatten schema
-        mapM_ (hPutStrLn stderr . show) msgs
-        let (analyzed, schemaErrors) = analyze flattened
-        null schemaErrors `unless` printExceptions input schemaErrors
-        let generator | isGenerateTypesOnly = codegen
-                      | otherwise           = parserCodegen
-        generatedFile <- generator generateOpts analyzed
-        let defoutputer = maybe putStrLn (\_ -> \_ -> return ()) testXmlFilename
-        maybe defoutputer writeFile outputToFile generatedFile
-        maybe (return ()) (testGeneratedParser generatedFile textXmlIsPrint) testXmlFilename
-        )
+    -- schema <- fromMaybe (error "no schema parse") <$> parseSchema input
+    schema <- processSchemaRec schemaFilename
+    print $ typesExtended schema
+    let (flattened, msgs) = flatten schema
+    forM_ msgs $ hPrint stderr
+    let (analyzed, schemaErrors) = analyze flattened
+    null schemaErrors `unless` printExceptions input schemaErrors
+    let generator | isGenerateTypesOnly = codegen
+                  | otherwise           = parserCodegen
+    generatedFile <- generator generateOpts analyzed
+    let defoutputer = maybe putStrLn (\_ -> \_ -> return ()) testXmlFilename
+    maybe defoutputer writeFile outputToFile generatedFile
+    maybe (return ()) (testGeneratedParser generatedFile textXmlIsPrint) testXmlFilename
 
 
 -- | Compile generated parser and run it with specified XML document

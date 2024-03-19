@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveDataTypeable  #-}
 {-# LANGUAGE DeriveGeneric       #-}
@@ -22,16 +23,23 @@ import           FromXML                     (XMLString)
 class Default a where
   def :: a
 
+newtype Qual = Qual {unQual :: XMLString}
+  deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
+newtype Namespace = Namespace {unNamespace :: XMLString}
+  deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
+type QualNamespace = Map Qual Namespace
 type TypeDict = Map XMLString Type
+type TypeDict1 = Map XMLString [(Namespace, (Type, QualNamespace))]
+
 
 data SchemaQualificator = SchemaQualificator
   { name :: XMLString
-  , qual :: XMLString
+  , qual :: Qual
   }
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 data SchemaImport = SchemaImport
-  { namespace :: XMLString
+  { impNamespace :: XMLString
   , schemaLocation :: XMLString
   }
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
@@ -41,13 +49,14 @@ data Schema = Schema
   { quals     :: ![SchemaQualificator]
   , imports   :: ![SchemaImport]
   , types     :: !TypeDict  -- ^ Types defined by name
+  , typesExtended :: !TypeDict1 -- ^ hack
   , tops      :: ![Element] -- ^ Possible top level elements
   , namespace :: !XMLString -- ^ Default namespace
   }
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 instance Default Schema where
-  def = Schema [] [] Data.Map.empty [] ""
+  def = Schema [] [] Data.Map.empty Data.Map.empty [] ""
 
 newtype ID = ID XMLString
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
