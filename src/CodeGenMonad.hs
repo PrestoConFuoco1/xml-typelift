@@ -109,6 +109,7 @@ import GHC.Stack (HasCallStack, callStack, prettyCallStack)
 import Data.String (IsString)
 import Data.Bifunctor (Bifunctor(..))
 import qualified Data.List.NonEmpty as NE
+import Text.InterpolatedString.Perl6
 
 trace :: HasCallStack => String -> a -> a
 trace msg = Debug.Trace.trace (msg <> "\n  " <> prettyCallStack callStack)
@@ -131,14 +132,14 @@ data TargetIdNS = TargetTypeName
 type IdClass = (XMLIdNS, TargetIdNS)
 
 newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString}
-  deriving newtype (Eq, Ord, Show, IsString)
+  deriving newtype (Eq, Ord, Show, IsString, ShowQ)
 newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
-  deriving newtype (Eq, Ord, Show, IsString)
+  deriving newtype (Eq, Ord, Show, IsString, ShowQ)
 mkHaskellTypeName :: XMLString -> HaskellTypeName
 mkHaskellTypeName = HaskellTypeName . normalizeTypeName . snd . splitNS
 
 newtype HaskellConsName = HaskellConsName {unHaskellConsName :: BS.ByteString}
-  deriving newtype (Eq, Ord, Show, IsString)
+  deriving newtype (Eq, Ord, Show, IsString, ShowQ)
 
 mkHaskellConsName :: BS.ByteString -> HaskellConsName
 mkHaskellConsName = HaskellConsName . normalizeTypeName . snd . splitNS

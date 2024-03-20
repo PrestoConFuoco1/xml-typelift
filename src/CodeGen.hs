@@ -148,7 +148,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
       Newtype (t, c, wt) -> declareNewtype t c wt
       Sumtype sumtype -> declareSumType sumtype
     when genParser do
-      outCodeLine [qc|type TopLevel = {bld $ unHaskellTypeName $ type_ $ head topNames}|]
+      outCodeLine [qc|type TopLevel = {type_ $ head topNames}|]
       outCodeLine [qc|-- PARSER --|]
       generateParserInternalStructures
       generateParserInternalArray1 opts schema
@@ -194,10 +194,9 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
     let topEl = head tops
     -- Generate parser header
     let topTag = eName topEl
-        topName' = unHaskellTypeName $ mkHaskellTypeName topTag
-        topName = bld topName'
-    when (minOccurs topEl /= 1) $ parseErrorBs topName' [qc|Wrong minOccurs = {minOccurs topEl}|]
-    when (maxOccurs topEl /= MaxOccurs 1) $ parseErrorBs topName' [qc|Wrong maxOccurs = {maxOccurs topEl}|]
+        topName = unHaskellTypeName $ mkHaskellTypeName topTag
+    when (minOccurs topEl /= 1) $ parseErrorBs topName [qc|Wrong minOccurs = {minOccurs topEl}|]
+    when (maxOccurs topEl /= MaxOccurs 1) $ parseErrorBs topName [qc|Wrong maxOccurs = {maxOccurs topEl}|]
     outCodeLine' [qc|parseTopLevelToArray :: ByteString -> Either String TopLevelInternal|]
     outCodeLine' [qc|parseTopLevelToArray bs = Right $ TopLevelInternal bs $ V.create $ do|]
     withIndent $ do
@@ -443,7 +442,7 @@ generateParserExtractTopLevel1 ::
   CG ()
 generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
     forM_ topTypes $ \topType -> do
-        let topTypeName = bld topType.type_.unHaskellTypeName
+        let topTypeName = topType.type_
         outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
         outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
     withIndent $ do
@@ -591,9 +590,9 @@ getExtContentAttrs c = case NE.nonEmpty $ map (.xmlName) c.attributes of
 
 mkChoiceTypeDeclaration :: ChoiceGI -> SumType
 mkChoiceTypeDeclaration ch =
-  ( TyData $ bld ch.typeName.unHaskellTypeName
+  ( TyData $ B.byteString ch.typeName.unHaskellTypeName
   , flip map ch.alts \(_eltName, cons_, conType) -> do
-    (TyCon $ bld cons_.unHaskellConsName, TyType $ bld conType.type_.unHaskellTypeName)
+    (TyCon $ B.byteString cons_.unHaskellConsName, TyType $ B.byteString conType.type_.unHaskellTypeName)
   )
 
 mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
@@ -666,9 +665,6 @@ getParserNameForType :: HaskellTypeName -> String
 getParserNameForType type_ = 
   "parse" <> cs type_.unHaskellTypeName <> "Content"
 
-bld :: XMLString -> B.Builder
-bld = B.byteString
-
 generateAttrContentParse :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentParse cgi = FunctionBody $ runCodeWriter do
   generateAttrsAllocation
@@ -686,7 +682,7 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
     let ofsNames' = ((arrStart, strStart) : [ ( [qc|arrOfs{i}|], [qc|strOfs{i}|]) | i <- [(1::Int)..]])
                     :: [(XMLString, XMLString)]
         ofsNames = zip ofsNames' (tail ofsNames')
-        (arrRet, strRet) = bimap bld bld $ ofsNames' !! length fields
+        (arrRet, strRet) = ofsNames' !! length fields
     forM_ (zip ofsNames fields) $ \((oldOffsets, (arrOfs', strOfs')), field) -> do
       out1 [qc|({arrOfs'}, {strOfs'}) <- do|]
       withIndent1 do
@@ -732,10 +728,10 @@ generateParseElementCall (arrOfs, strOfs) field = do
   out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}" {arrOfs} {strOfs} {parserName}|]
 
 getAttrsRoutingName :: HaskellTypeName -> XMLString
-getAttrsRoutingName t = [qc|get{bld $ unHaskellTypeName t}AttrOffset|]
+getAttrsRoutingName t = [qc|get{t}AttrOffset|]
 
 getAttrsAllocatorName :: HaskellTypeName -> XMLString
-getAttrsAllocatorName t = [qc|allocate{bld $ unHaskellTypeName t}Attrs|]
+getAttrsAllocatorName t = [qc|allocate{t}Attrs|]
 
 generateChoiceParseFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
@@ -749,54 +745,53 @@ generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
 
 generateChoiceExtractFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
-  let chName = bld ch.typeName.unHaskellTypeName
+  let chName = ch.typeName
   out1 [qc|extract{chName}Content ofs = do|]
   withIndent1 do
     let vecIndex = "`V.unsafeIndex`" :: String
     out1 [qc|let altIdx = arr {vecIndex} ofs|]
     out1 [qc|case altIdx of|]
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((_altTag, cons_, type_), altIdx) -> do
-      let consBld = bld cons_.unHaskellConsName
-          typeBld = bld type_.type_.unHaskellTypeName
-      out1 [qc|{altIdx} -> first {consBld} $ extract{typeBld}Content (ofs + 1)|]
+      let typeName = type_.type_
+      out1 [qc|{altIdx} -> first {cons_} $ extract{typeName}Content (ofs + 1)|]
 
 generateAttrContentExtract :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
-  let recType = bld cgi.typeName.unHaskellTypeName
-  let baseType = bld cgi.contentType.unHaskellTypeName
+  let recType = cgi.typeName
+  let baseType = cgi.contentType
   let attrNum = length cgi.attributes
-  let consName = bld cgi.consName.unHaskellConsName
+  let consName = cgi.consName
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 $ do
     forM_ (zip cgi.attributes [1..attrNum]) $ \(attr, aIdx) -> do
         let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
         let haskellAttrName = attr.haskellName.unHaskellFieldName
-        let haskellTypeName = bld attr.typeName.type_.unHaskellTypeName
-        out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+        let haskellTypeName = attr.typeName.type_
+        out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
     out1 [qc|let (content, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
 
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
-  let recType = bld s.typeName.unHaskellTypeName
+  let recType = s.typeName
   let attrNum = length s.attributes
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 $ do
       attrFields <- forM (zip s.attributes [1..attrNum]) $ \(attr, aIdx) -> do
           let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
-          let haskellAttrName = attr.haskellName.unHaskellFieldName
-          let haskellTypeName = bld attr.typeName.type_.unHaskellTypeName
-          out1 [qc|let ({bld haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+          let haskellAttrName = attr.haskellName
+          let haskellTypeName = attr.typeName.type_
+          out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
           return haskellAttrName
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
-                  fieldName = fld.haskellName.unHaskellFieldName
+                  fieldName = fld.haskellName
                   extractor = getExtractorNameWithQuant ofs fld
-              out1 [qc|let ({bld fieldName}, ofs{ofsIdx}) = {extractor} in|]
+              out1 [qc|let ({fieldName}, ofs{ofsIdx}) = {extractor} in|]
               return fieldName
       let fields = attrFields ++ properFields
           ofs' = if null fields then "ofs" else [qc|ofs{length fields}|]::XMLString
-          haskellConsName = s.consName.unHaskellConsName
+          haskellConsName = s.consName
       case fields of
           []         -> out1 [qc|({haskellConsName}, {ofs'})|]
           [oneField] -> out1 [qc|({haskellConsName} {oneField}, {ofs'})|]
@@ -809,7 +804,7 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
                 RepMaybe -> Just "extractMaybe"
                 RepOnce  -> Nothing
                 _        -> Just "extractMany" -- TODO add extractExact support
-            fieldTypeName = bld fld.typeName.type_.unHaskellTypeName
+            fieldTypeName = fld.typeName.type_
         case fieldQuantifier of
                  Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
                  Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
@@ -1091,22 +1086,21 @@ generateEnumParseFunc en = FunctionBody $ runCodeWriter do
 
 generateNewtypeExtractFunc :: NewtypeGI -> FunctionBody
 generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
-  let typeName = bld ngi.typeName.unHaskellTypeName
-      consName = bld ngi.consName.unHaskellConsName
-      wrappedName = bld ngi.wrappedType.type_.unHaskellTypeName
+  let typeName = ngi.typeName
+      consName = ngi.consName
+      wrappedName = ngi.wrappedType.type_
   out1 [qc|extract{typeName}Content ofs =|]
   withIndent1 do
     out1 [qc|first {consName} $ extract{wrappedName}Content ofs|]
 
 generateEnumExtractFunc :: EnumGI -> FunctionBody
 generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
-  let recType = bld en.typeName.unHaskellTypeName
+  let recType = en.typeName
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 do
     out1 [qc|first (\case|]
-    for_ en.constrs \(xmlName, haskellCon) -> do
-      let conBld = bld haskellCon.unHaskellConsName
-      out1 [qc|"{bld xmlName}" -> {conBld}|]
+    for_ en.constrs \(xmlName, haskellCon) ->
+      out1 [qc|"{xmlName}" -> {haskellCon}|]
     out1 [qc|) $ extractStringContent ofs|]
 
 registerGI :: GIType -> CG ()
