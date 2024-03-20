@@ -138,10 +138,10 @@ codegen c sch = codegen' sch $ generateParser2 False c sch
 generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
 generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
     generateModuleHeading opts
-    schemaTypesMap .= schema.typesExtended
+    schemaTypesMap .= Map.fromList (map (first mkXmlNameWN) $ Map.toList schema.typesExtended)
     --processSchemaNamedTypes schema.types
     let quals = getSchemaQualNamespace schema
-    topNames <- forM schema.tops \el -> processType quals (eName el) (eType el)
+    topNames <- forM schema.tops \el -> processType quals (mkXmlNameWN $ eName el) (eType el)
     declaredTypes <- Lens.use typeDecls
     forM_ declaredTypes \case
       Alg rec -> declareAlgebraicType rec
@@ -813,7 +813,7 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
 
 lookupHaskellTypeBySchemaType :: QualNamespace -> XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType quals xmlType =
- let (namespaceShort, typeName) = splitNS xmlType in
+ let (namespaceShort, XmlNameWN -> typeName) = splitNS xmlType in
  case Map.lookup typeName knownBaseTypes of
  Just x -> pure x
  Nothing -> do
@@ -838,10 +838,10 @@ lookupHaskellTypeBySchemaType quals xmlType =
           withTypeNotFoundErr $ List.find ((== namespace_) . fst) typesWithName
 
   case Map.lookup typeName knownTypes_ of
-    Nothing -> processSchemaNamedType quals_ namespace (xmlType, knownSchType)
+    Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN $ xmlType, knownSchType)
     Just hTypesWithNamespaces ->
       case List.lookup namespace hTypesWithNamespaces of
-        Nothing -> processSchemaNamedType quals_ namespace (xmlType, knownSchType)
+        Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN $ xmlType, knownSchType)
         Just x -> pure x
   where
   
@@ -889,7 +889,7 @@ echo :: Show a => String -> a -> a
 echo msg x = (msg <> ": " <> show x) `trace` x
 
 getUniqueName :: (Monad m, Ord a) => (XMLString -> a) -> XMLString -> m (Set.Set a) -> m a
-getUniqueName mk (snd . splitNS {-. echo "unique"-} -> possibleName) getSet = do
+getUniqueName mk possibleName getSet = do
   set_ <- getSet
   pure $ fromJust $ List.find (flip Set.notMember set_) possibleAlternatives
   where
@@ -910,13 +910,13 @@ getUniqueConsName s = do
   pure res
 
 processComplex ::
-  XMLString -> -- ^ possible name
+  XmlNameWN -> -- ^ possible name
   QualNamespace ->
   Bool ->
   [Attr] ->
   TyPart ->
   CG TypeWithAttrs
-processComplex (normalizeTypeName . snd . splitNS -> possibleName) quals _mixed attrs inner = case inner of
+processComplex possibleName quals _mixed attrs inner = case inner of
   Seq seqParts -> case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
     Just elts -> do
@@ -933,16 +933,16 @@ processComplex (normalizeTypeName . snd . splitNS -> possibleName) quals _mixed 
   where
   mkChoiceGI :: [Element] -> CG ChoiceGI
   mkChoiceGI elts = do
-    typeName <- getUniqueTypeName possibleName
+    typeName <- getUniqueTypeName possibleName.unXmlNameWN
     alts <- forM elts \el -> do
-      altType <- processType quals (eName el) (eType el)
-      consName <- getUniqueConsName $ possibleName <> normalizeTypeName (eName el)
+      altType <- processType quals (mkXmlNameWN $ eName el) (eType el)
+      consName <- getUniqueConsName $ possibleName.unXmlNameWN <> normalizeTypeName (eName el)
       pure (eName el, consName, altType)
     pure ChoiceGI {typeName, alts}
   mkSequenceGI :: [Element] -> CG SequenceGI
   mkSequenceGI elts = do
-    typeName <- getUniqueTypeName possibleName
-    consName <- getUniqueConsName possibleName
+    typeName <- getUniqueTypeName possibleName.unXmlNameWN
+    consName <- getUniqueConsName possibleName.unXmlNameWN
     attrFields <- mapM (attributeToField quals) attrs
     fields <- mapM elementToField elts
     pure SequenceGI
@@ -953,7 +953,7 @@ processComplex (normalizeTypeName . snd . splitNS -> possibleName) quals _mixed 
       }
   elementToField :: Element -> CG FieldGI
   elementToField elt = do
-    typeName <- processType quals (eName elt) $ eType elt
+    typeName <- processType quals (mkXmlNameWN $ eName elt) $ eType elt
     pure FieldGI
       { haskellName = eltNameToHaskellFieldName $ eName elt
       , xmlName = eName elt
@@ -966,7 +966,7 @@ processComplex (normalizeTypeName . snd . splitNS -> possibleName) quals _mixed 
 
 attributeToField :: QualNamespace -> Attr -> CG FieldGI
 attributeToField quals attr = do
-  typeName <- processType quals (aName attr) $ aType attr
+  typeName <- processType quals (mkXmlNameWN $ aName attr) $ aType attr
   pure FieldGI
     { haskellName = attrNameToHaskellFieldName $ aName attr
     , xmlName = aName attr
@@ -980,15 +980,15 @@ eltNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
 attrNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 
-processType :: QualNamespace -> XMLString -> Type -> CG TypeWithAttrs
-processType quals (normalizeTypeName . snd . splitNS -> possibleName) = \case
+processType :: QualNamespace -> XmlNameWN -> Type -> CG TypeWithAttrs
+processType quals possibleName = \case
   Ref knownType ->
     lookupHaskellTypeBySchemaType quals knownType
   Complex{mixed, attrs, inner} ->
     processComplex possibleName quals mixed attrs inner
   Restriction{base, restricted} -> case restricted of
     Enum alts -> do
-      typeName <- getUniqueTypeName possibleName
+      typeName <- getUniqueTypeName possibleName.unXmlNameWN
       constrs <- forM alts \alt -> (alt,) <$> getUniqueConsName alt
       let
         enum_ = EnumGI {typeName, constrs}
@@ -1008,8 +1008,8 @@ processType quals (normalizeTypeName . snd . splitNS -> possibleName) = \case
   -- t -> error $ "not ref and complex, not supported: " <> show t
   where
   processAsNewtype base = do
-      typeName <- getUniqueTypeName possibleName
-      consName <- getUniqueConsName possibleName
+      typeName <- getUniqueTypeName possibleName.unXmlNameWN
+      consName <- getUniqueConsName possibleName.unXmlNameWN
       wrappedType <- lookupHaskellTypeBySchemaType quals base
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
@@ -1024,7 +1024,7 @@ attrInfoFromGIType = \case
   GEnum _en -> NoAttrs
   GWrapper _nwt -> NoAttrs
 
-mkExtendedGI :: QualNamespace -> Type -> XMLString -> HaskellTypeName -> GIType -> CG (HaskellTypeName, GIType)
+mkExtendedGI :: QualNamespace -> Type -> XmlNameWN -> HaskellTypeName -> GIType -> CG (HaskellTypeName, GIType)
 mkExtendedGI quals mixin possibleName baseType gi = case gi of
   _x
     | isSimpleContentType gi, Just attrs <- mbAttrsExtension ->
@@ -1041,8 +1041,8 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     NE.NonEmpty Attr ->
     CG (HaskellTypeName, ContentWithAttrsGI)
   addAttrsToSimple attrs = do
-    typeName <- getUniqueTypeName possibleName
-    consName <- getUniqueConsName possibleName
+    typeName <- getUniqueTypeName possibleName.unXmlNameWN
+    consName <- getUniqueConsName possibleName.unXmlNameWN
     attrFields <- mapM (attributeToField quals) attrs
     pure $ (typeName,) ContentWithAttrsGI
       { typeName
@@ -1126,13 +1126,13 @@ registerNewtypeGI ngi = do
 
  
 
-registerNamedType :: XMLString -> Namespace -> TypeWithAttrs -> CG ()
+registerNamedType :: XmlNameWN -> Namespace -> TypeWithAttrs -> CG ()
 registerNamedType xmlName namespace haskellType = do
   -- knownTypes %= Map.insert xmlName haskellType
   knownTypes %= Map.alter (Just . ((namespace, haskellType) :) . fromMaybe []) xmlName
   -- processedSchemaTypes %= Set.insert xmlName -- TODO: why is it here?
 
-processSchemaNamedType :: QualNamespace -> Namespace -> (XMLString, Type) -> CG TypeWithAttrs
+processSchemaNamedType :: QualNamespace -> Namespace -> (XmlNameWN, Type) -> CG TypeWithAttrs
 processSchemaNamedType quals namespace (tName, tDef) = do
   q <- Lens.use knownTypes
   case Map.lookup tName q of

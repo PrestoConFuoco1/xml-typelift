@@ -65,6 +65,7 @@ module CodeGenMonad(-- Code generation monad
                    ,HaskellConsName
                    ,unHaskellConsName
                    ,mkHaskellConsName
+                   ,XmlNameWN (..)
                    ,FunctionBody(..)
                    ,TypeWithAttrs(..)
                    ,AttributesInfo(..)
@@ -78,6 +79,7 @@ module CodeGenMonad(-- Code generation monad
                    ,FieldGI (..)
                    ,ContentWithAttrsGI (..)
                    ,knownBaseTypes
+                   ,mkXmlNameWN
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -136,15 +138,21 @@ newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString
 newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
   deriving newtype (Eq, Ord, Show, IsString, ShowQ)
 mkHaskellTypeName :: XMLString -> HaskellTypeName
-mkHaskellTypeName = HaskellTypeName . normalizeTypeName . snd . splitNS
+mkHaskellTypeName = HaskellTypeName . normalizeTypeName
 
 newtype HaskellConsName = HaskellConsName {unHaskellConsName :: BS.ByteString}
   deriving newtype (Eq, Ord, Show, IsString, ShowQ)
 
-mkHaskellConsName :: BS.ByteString -> HaskellConsName
-mkHaskellConsName = HaskellConsName . normalizeTypeName . snd . splitNS
+mkHaskellConsName :: XMLString -> HaskellConsName
+mkHaskellConsName = HaskellConsName . normalizeTypeName
 
 newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
+
+newtype XmlNameWN = XmlNameWN {unXmlNameWN :: XMLString}
+  deriving newtype (Eq, Ord, Show, IsString, ShowQ)
+
+mkXmlNameWN :: XMLString -> XmlNameWN
+mkXmlNameWN = XmlNameWN . snd . splitNS
 
 data TypeWithAttrs = TypeWithAttrs
   { type_ :: HaskellTypeName
@@ -229,13 +237,13 @@ data CGState =
   CGState {
     _allocatedHaskellTypes :: Set.Set HaskellTypeName
   , _allocatedHaskellConses :: Set.Set HaskellConsName
-  , _knownTypes :: Map.Map XMLString [(Namespace, TypeWithAttrs)]
+  , _knownTypes :: Map.Map XmlNameWN [(Namespace, TypeWithAttrs)]
   , _typeDecls :: [TypeDecl]
   , _parseFunctions :: [FunctionBody]
   , _extractFunctions :: [FunctionBody]
   , _processedSchemaTypes :: Set.Set XMLString
   -- , _schemaTypesMap :: Map.Map XMLString Type
-  , _schemaTypesMap :: Map.Map XMLString [(Namespace, (Type, QualNamespace))]
+  , _schemaTypesMap :: Map.Map XmlNameWN [(Namespace, (Type, QualNamespace))]
 
   -- FOR GENERATING
   , _indent               :: Int
@@ -286,14 +294,14 @@ defaultNamespace :: Namespace
 defaultNamespace = Namespace "http://www.w3.org/2001/XMLSchema"
 
 
-knownBaseTypes :: Map.Map BS.ByteString TypeWithAttrs
-knownBaseTypes = Map.fromList $ map (second $ flip typeNoAttrs GBaseType . HaskellTypeName) baseTranslations
+knownBaseTypes :: Map.Map XmlNameWN TypeWithAttrs
+knownBaseTypes = Map.fromList $ map (bimap mkXmlNameWN (flip typeNoAttrs GBaseType . HaskellTypeName)) baseTranslations
 
 initialState :: CGState
 initialState  = CGState
                (Set.fromList $ map (HaskellTypeName . snd) baseTranslations)
                (Set.fromList $ map (HaskellConsName . snd) baseTranslations)
-               (Map.fromList $ map (second $ (:[]) . (defaultNamespace,) .  flip typeNoAttrs GBaseType . HaskellTypeName) baseTranslations)
+               (Map.fromList $ map (bimap mkXmlNameWN ((:[]) . (defaultNamespace,) .  flip typeNoAttrs GBaseType . HaskellTypeName)) baseTranslations)
                []
                []
                []
