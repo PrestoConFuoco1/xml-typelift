@@ -909,36 +909,19 @@ getUniqueConsName s = do
   allocatedHaskellConses %= Set.insert res
   pure res
 
-processComplex ::
-  XmlNameWN -> -- ^ possible name
+processSeq ::
+  XmlNameWN ->
   QualNamespace ->
-  Bool ->
   [Attr] ->
-  TyPart ->
+  [TyPart] ->
   CG TypeWithAttrs
-processComplex possibleName quals _mixed attrs inner = case inner of
-  Seq seqParts -> case traverse getElement seqParts of
+processSeq possibleName quals attrs seqParts = case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
     Just elts -> do
       sGI <- mkSequenceGI elts
       registerSequenceGI sGI
       pure $ TypeWithAttrs sGI.typeName $ GSeq sGI
-  Choice choiceAlts -> case traverse getElement choiceAlts of
-    Nothing -> error "only choice between elements is supported"
-    Just elts -> do
-      chGI <- mkChoiceGI elts
-      registerChoiceGI chGI
-      pure $ typeNoAttrs chGI.typeName $ GChoice chGI
-  _ -> error "anything other than Seq inside Complex is not supported"
   where
-  mkChoiceGI :: [Element] -> CG ChoiceGI
-  mkChoiceGI elts = do
-    typeName <- getUniqueTypeName possibleName.unXmlNameWN
-    alts <- forM elts \el -> do
-      altType <- processType quals (mkXmlNameWN $ eName el) (eType el)
-      consName <- getUniqueConsName $ possibleName.unXmlNameWN <> normalizeTypeName (eName el)
-      pure (eName el, consName, altType)
-    pure ChoiceGI {typeName, alts}
   mkSequenceGI :: [Element] -> CG SequenceGI
   mkSequenceGI elts = do
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
@@ -960,9 +943,40 @@ processComplex possibleName quals _mixed attrs inner = case inner of
       , cardinality = eltToRepeatedness elt
       , typeName
       }
-  getElement :: TyPart -> Maybe Element
-  getElement (Elt e) = Just e
-  getElement _ = Nothing
+
+processChoice :: XmlNameWN -> QualNamespace -> [TyPart] -> CG TypeWithAttrs
+processChoice possibleName quals choiceAlts =
+  case traverse getElement choiceAlts of
+    Nothing -> error "only choice between elements is supported"
+    Just elts -> do
+      chGI <- mkChoiceGI elts
+      registerChoiceGI chGI
+      pure $ typeNoAttrs chGI.typeName $ GChoice chGI
+  where
+  mkChoiceGI :: [Element] -> CG ChoiceGI
+  mkChoiceGI elts = do
+    typeName <- getUniqueTypeName possibleName.unXmlNameWN
+    alts <- forM elts \el -> do
+      altType <- processType quals (mkXmlNameWN $ eName el) (eType el)
+      consName <- getUniqueConsName $ possibleName.unXmlNameWN <> normalizeTypeName (eName el)
+      pure (eName el, consName, altType)
+    pure ChoiceGI {typeName, alts}
+
+processTyPart ::
+  XmlNameWN -> -- ^ possible name
+  QualNamespace ->
+  Bool ->
+  [Attr] ->
+  TyPart ->
+  CG TypeWithAttrs
+processTyPart possibleName quals _mixed attrs inner = case inner of
+  Seq seqParts -> processSeq possibleName quals attrs seqParts
+  Choice choiceAlts -> processChoice possibleName quals choiceAlts
+  _ -> error "anything other than Seq or Choice inside Complex is not supported"
+
+getElement :: TyPart -> Maybe Element
+getElement (Elt e) = Just e
+getElement _ = Nothing
 
 attributeToField :: QualNamespace -> Attr -> CG FieldGI
 attributeToField quals attr = do
@@ -985,7 +999,7 @@ processType quals possibleName = \case
   Ref knownType ->
     lookupHaskellTypeBySchemaType quals knownType
   Complex{mixed, attrs, inner} ->
-    processComplex possibleName quals mixed attrs inner
+    processTyPart possibleName quals mixed attrs inner
   Restriction{base, restricted} -> case restricted of
     Enum alts -> do
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
