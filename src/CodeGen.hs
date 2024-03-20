@@ -668,13 +668,13 @@ getParserNameForType type_ =
 generateAttrContentParse :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentParse cgi = FunctionBody $ runCodeWriter do
   generateAttrsAllocation
-    TypeWithAttrs {type_ = cgi.typeName, attrs = getExtContentAttrs cgi, giType = GAttrContent cgi}
+    TypeWithAttrs {type_ = cgi.typeName, giType = GAttrContent cgi}
   out1 (getParserNameForType cgi.typeName <> " = " <> getParserNameForType cgi.contentType)
 
 generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
   generateAttrsAllocation
-    TypeWithAttrs { type_ = s.typeName, attrs = getSequenceAttrs s, giType = GSeq s }
+    TypeWithAttrs { type_ = s.typeName, giType = GSeq s }
   out1 (getParserNameForType s.typeName <> " arrStart strStart = do")
   withIndent1 do
     let (arrStart, strStart) = ("arrStart", "strStart")
@@ -693,7 +693,7 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
 generateAttrsAllocation ::
   TypeWithAttrs ->
   CodeWriter
-generateAttrsAllocation TypeWithAttrs{type_, attrs = attrInfo} =
+generateAttrsAllocation TypeWithAttrs{type_, giType} =
   withPresentAttrs \attrs -> do
     let attrsNum = length attrs
     let totalAllocLen = 2*attrsNum
@@ -707,7 +707,7 @@ generateAttrsAllocation TypeWithAttrs{type_, attrs = attrInfo} =
         out1 [qc|"{attr}" -> ofs + {ofs}|]
       out1 [qc|_ -> (-1)|]
   where
-  withPresentAttrs action = case attrInfo of
+  withPresentAttrs action = case attrInfoFromGIType giType of
     NoAttrs -> pure ()
     AttributesInfo neStr -> action neStr
 
@@ -715,7 +715,7 @@ generateParseElementCall :: (XMLString, XMLString) -> FieldGI -> CodeWriter
 generateParseElementCall (arrOfs, strOfs) field = do
   let parsedType = field.typeName.type_
       parserName = getParserNameForType parsedType
-      hasAttrs = field.typeName.attrs /= NoAttrs
+      hasAttrs = attrInfoFromGIType field.typeName.giType /= NoAttrs
       (allocator :: B.Builder, tagQModifier) =
         if hasAttrs
         then ([qc|{getAttrsAllocatorName parsedType} {getAttrsRoutingName parsedType} |], (<> "WithAttrs"))
@@ -922,7 +922,7 @@ processComplex possibleName quals _mixed attrs inner = case inner of
     Just elts -> do
       sGI <- mkSequenceGI elts
       registerSequenceGI sGI
-      pure $ TypeWithAttrs sGI.typeName (getSequenceAttrs sGI) $ GSeq sGI
+      pure $ TypeWithAttrs sGI.typeName $ GSeq sGI
   Choice choiceAlts -> case traverse getElement choiceAlts of
     Nothing -> error "only choice between elements is supported"
     Just elts -> do
@@ -1002,7 +1002,6 @@ processType quals possibleName = \case
     registerGI extGI
     pure $ TypeWithAttrs
       { type_ = hType
-      , attrs = attrInfoFromGIType extGI
       , giType = extGI
       }
   -- t -> error $ "not ref and complex, not supported: " <> show t

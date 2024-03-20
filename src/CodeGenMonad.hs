@@ -156,7 +156,6 @@ mkXmlNameWN = XmlNameWN . snd . splitNS
 
 data TypeWithAttrs = TypeWithAttrs
   { type_ :: HaskellTypeName
-  , attrs :: AttributesInfo
   , giType :: GIType
   }
   deriving stock (Show)
@@ -169,7 +168,7 @@ data AttributesInfo
   deriving stock (Eq, Show)
 
 typeNoAttrs :: HaskellTypeName -> GIType -> TypeWithAttrs
-typeNoAttrs t = TypeWithAttrs t NoAttrs
+typeNoAttrs = TypeWithAttrs
 
 data GIType
   = GBaseType
