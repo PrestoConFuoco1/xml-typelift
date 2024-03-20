@@ -141,7 +141,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
     schemaTypesMap .= Map.fromList (map (first mkXmlNameWN) $ Map.toList schema.typesExtended)
     --processSchemaNamedTypes schema.types
     let quals = getSchemaQualNamespace schema
-    topNames <- forM schema.tops \el -> processType quals (mkXmlNameWN $ eName el) (eType el)
+    topNames <- forM schema.tops \el -> processType quals (Just $ mkXmlNameWN $ eName el) (eType el)
     declaredTypes <- Lens.use typeDecls
     forM_ declaredTypes \case
       Alg rec -> declareAlgebraicType rec
@@ -910,18 +910,19 @@ getUniqueConsName s = do
   pure res
 
 processSeq ::
-  XmlNameWN ->
+  Maybe XmlNameWN ->
   QualNamespace ->
   [Attr] ->
   [TyPart] ->
   CG TypeWithAttrs
-processSeq possibleName quals attrs seqParts = case traverse getElement seqParts of
+processSeq mbPossibleName quals attrs seqParts = case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
     Just elts -> do
       sGI <- mkSequenceGI elts
       registerSequenceGI sGI
       pure $ TypeWithAttrs sGI.typeName $ GSeq sGI
   where
+  possibleName = fromMaybe (error "processSeq:possibleName") mbPossibleName
   mkSequenceGI :: [Element] -> CG SequenceGI
   mkSequenceGI elts = do
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
@@ -936,7 +937,7 @@ processSeq possibleName quals attrs seqParts = case traverse getElement seqParts
       }
   elementToField :: Element -> CG FieldGI
   elementToField elt = do
-    typeName <- processType quals (mkXmlNameWN $ eName elt) $ eType elt
+    typeName <- processType quals (Just $ mkXmlNameWN $ eName elt) $ eType elt
     pure FieldGI
       { haskellName = eltNameToHaskellFieldName $ eName elt
       , xmlName = eName elt
@@ -944,8 +945,8 @@ processSeq possibleName quals attrs seqParts = case traverse getElement seqParts
       , typeName
       }
 
-processChoice :: XmlNameWN -> QualNamespace -> [TyPart] -> CG TypeWithAttrs
-processChoice possibleName quals choiceAlts =
+processChoice :: Maybe XmlNameWN -> QualNamespace -> [TyPart] -> CG TypeWithAttrs
+processChoice mbPossibleName quals choiceAlts =
   case traverse getElement choiceAlts of
     Nothing -> error "only choice between elements is supported"
     Just elts -> do
@@ -953,17 +954,18 @@ processChoice possibleName quals choiceAlts =
       registerChoiceGI chGI
       pure $ typeNoAttrs chGI.typeName $ GChoice chGI
   where
+  possibleName = fromMaybe (error "processChoice:possibleName") mbPossibleName
   mkChoiceGI :: [Element] -> CG ChoiceGI
   mkChoiceGI elts = do
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
     alts <- forM elts \el -> do
-      altType <- processType quals (mkXmlNameWN $ eName el) (eType el)
+      altType <- processType quals (Just $ mkXmlNameWN $ eName el) (eType el)
       consName <- getUniqueConsName $ possibleName.unXmlNameWN <> normalizeTypeName (eName el)
       pure (eName el, consName, altType)
     pure ChoiceGI {typeName, alts}
 
 processTyPart ::
-  XmlNameWN -> -- ^ possible name
+  Maybe XmlNameWN -> -- ^ possible name
   QualNamespace ->
   Bool ->
   [Attr] ->
@@ -980,7 +982,7 @@ getElement _ = Nothing
 
 attributeToField :: QualNamespace -> Attr -> CG FieldGI
 attributeToField quals attr = do
-  typeName <- processType quals (mkXmlNameWN $ aName attr) $ aType attr
+  typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) $ aType attr
   pure FieldGI
     { haskellName = attrNameToHaskellFieldName $ aName attr
     , xmlName = aName attr
@@ -994,14 +996,15 @@ eltNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
 attrNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 
-processType :: QualNamespace -> XmlNameWN -> Type -> CG TypeWithAttrs
-processType quals possibleName = \case
+processType :: QualNamespace -> Maybe XmlNameWN -> Type -> CG TypeWithAttrs
+processType quals mbPossibleName = \case
   Ref knownType ->
     lookupHaskellTypeBySchemaType quals knownType
   Complex{mixed, attrs, inner} ->
-    processTyPart possibleName quals mixed attrs inner
+    processTyPart mbPossibleName quals mixed attrs inner
   Restriction{base, restricted} -> case restricted of
     Enum alts -> do
+      let possibleName = fromMaybe (error "anonymous enums are not supported") mbPossibleName
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
       constrs <- forM alts \alt -> (alt,) <$> getUniqueConsName alt
       let
@@ -1012,6 +1015,7 @@ processType quals possibleName = \case
     None -> processAsNewtype base
   Extension{base, mixin} -> do
     baseHType <- lookupHaskellTypeBySchemaType quals base
+    let possibleName = fromMaybe (XmlNameWN $ baseHType.type_.unHaskellTypeName <> "Ext") mbPossibleName
     (hType, extGI) <- mkExtendedGI quals mixin possibleName baseHType.type_ baseHType.giType
     registerGI extGI
     pure $ TypeWithAttrs
@@ -1021,6 +1025,9 @@ processType quals possibleName = \case
   -- t -> error $ "not ref and complex, not supported: " <> show t
   where
   processAsNewtype base = do
+      let
+        possibleName =
+          fromMaybe (mkXmlNameWN $ base <> "Wrapper") mbPossibleName
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
       consName <- getUniqueConsName possibleName.unXmlNameWN
       wrappedType <- lookupHaskellTypeBySchemaType quals base
@@ -1152,7 +1159,7 @@ processSchemaNamedType quals namespace (tName, tDef) = do
     Just q_
       | Just w_ <- List.lookup namespace q_ -> pure w_
     _ -> do
-      haskellTypeName <- processType quals tName tDef
+      haskellTypeName <- processType quals (Just tName) tDef
       registerNamedType tName namespace haskellTypeName
       pure haskellTypeName
 
