@@ -591,7 +591,7 @@ getExtContentAttrs c = case NE.nonEmpty $ map (fromJust . (.xmlName)) c.attribut
 mkChoiceTypeDeclaration :: ChoiceGI -> SumType
 mkChoiceTypeDeclaration ch =
   ( TyData $ B.byteString ch.typeName.unHaskellTypeName
-  , flip map ch.alts \(_eltName, cons_, conType) -> do
+  , flip map ch.alts \(_inTagInfo, _possibleTags, cons_, conType) -> do
     (TyCon $ B.byteString cons_.unHaskellConsName, TyType $ B.byteString conType.type_.unHaskellTypeName)
   )
 
@@ -751,10 +751,16 @@ generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
   out1 (getParserNameForType ch.typeName <> " arrStart strStart = do") >> withIndent1 do
     out1 [qc|let tagName = getTagName strStart|]
     out1 [qc|case tagName of|]
-    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((altTag, _cons, type_), altIdx) -> do
+    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((inTagInfo, possibleFirstTags, _cons, type_), altIdx) -> do
       let altParser = getParserNameForType type_.type_
           vecWrite {- | isUnsafe -} = "V.unsafeWrite" :: B.Builder
-      out1 [qc|"{altTag}" -> {vecWrite} vec arrStart {altIdx} >> inOneTag "{altTag}" (arrStart+1) strStart {altParser}|]
+          captureCon = [qc|{vecWrite} vec arrStart {altIdx}|] :: B.Builder
+          parseFunc = case inTagInfo of
+            Nothing -> [qc|{altParser} (arrStart+1) strStart|] :: B.Builder
+            Just (altTag, _card) -> [qc|inOneTag "{altTag}" (arrStart+1) strStart {altParser}|] -- FIXME: use cardinality
+      forM_ possibleFirstTags \firstTag ->
+        out1 [qc|"{firstTag}" -> {captureCon} >> {parseFunc}|]
+      -- out1 [qc|"{altTag}" -> {captureCon} >> inOneTag "{altTag}" (arrStart+1) strStart {altParser}|]
 
 generateChoiceExtractFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
@@ -764,7 +770,7 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
     let vecIndex = "`V.unsafeIndex`" :: String
     out1 [qc|let altIdx = arr {vecIndex} ofs|]
     out1 [qc|case altIdx of|]
-    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((_altTag, cons_, type_), altIdx) -> do
+    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((_inTagInfo, _possibleFirstTags, cons_, type_), altIdx) -> do
       let typeName = type_.type_
       out1 [qc|{altIdx} -> first {cons_} $ extract{typeName}Content (ofs + 1)|]
 
@@ -951,14 +957,6 @@ processSeq mbPossibleName quals attrs seqParts = do
     , inTagInfo = Nothing
     , possibleFirstTag = (head underTypes).possibleFirstTag
     }
-{-
-  case traverse getElement seqParts of
-    Nothing -> error "only sequence of elements is supported"
-    Just elts -> do
-      sGI <- mkSequenceGI elts
-      registerSequenceGI sGI
-      pure $ TypeWithAttrs sGI.typeName $ GSeq sGI
--}
   where
   mkSequenceGI :: XMLString -> [TyPartInfo] -> CG SequenceGI
   mkSequenceGI possibleName tyParts = do
@@ -979,7 +977,6 @@ processSeq mbPossibleName quals attrs seqParts = do
         Nothing -> "anonymousField"
         Just (tagName, _) -> eltNameToHaskellFieldName tagName
       , xmlName = Nothing
-      --, cardinality = eltToRepeatedness elt
       , typeName = tyPart.partType
       , inTagInfo = tyPart.inTagInfo
       }
@@ -989,7 +986,29 @@ processChoice ::
   QualNamespace ->
   [TyPart] ->
   CG TyPartInfo
-processChoice mbPossibleName quals choiceAlts =
+processChoice mbPossibleName quals choiceAlts = do
+  underTypes <- forM choiceAlts (processTyPart Nothing quals False [])
+  let
+    possibleName =
+      fromMaybe "UnknownChoice" $
+        asum
+          [ unXmlNameWN <$> mbPossibleName
+          , (<> "Or") . unHaskellTypeName . (.partType.type_) <$> listToMaybe underTypes
+          ]
+  chGI <- mkChoiceGI possibleName underTypes
+  registerChoiceGI chGI
+  let
+    type_ = TypeWithAttrs
+      { type_ = chGI.typeName
+      , giType = GChoice chGI
+      }
+  pure TyPartInfo
+    { partType = type_
+    , inTagInfo = Nothing
+    , possibleFirstTag = concatMap possibleFirstTag underTypes
+    }
+
+{-
   case traverse getElement choiceAlts of
     Nothing -> error "only choice between elements is supported"
     Just elts -> do
@@ -1003,15 +1022,15 @@ processChoice mbPossibleName quals choiceAlts =
         , inTagInfo = Nothing
         , possibleFirstTag = map eName elts
         }
-      -- pure $ typeNoAttrs chGI.typeName $ GChoice chGI
+        -}
   where
-  mkChoiceGI :: XMLString -> [Element] -> CG ChoiceGI
-  mkChoiceGI possibleName elts = do
+  mkChoiceGI :: XMLString -> [TyPartInfo] -> CG ChoiceGI
+  mkChoiceGI possibleName tyParts = do
     typeName <- getUniqueTypeName possibleName
-    alts <- forM elts \el -> do
-      altType <- processType quals (Just $ mkXmlNameWN $ eName el) (eType el)
-      consName <- getUniqueConsName $ possibleName <> normalizeTypeName (eName el)
-      pure (eName el, consName, altType)
+    alts <- forM tyParts \tp -> do
+      -- altType <- processType quals (Just $ mkXmlNameWN $ eName el) (eType el)
+      consName <- getUniqueConsName $ possibleName <> normalizeTypeName (tp.partType.type_.unHaskellTypeName)
+      pure (tp.inTagInfo, tp.possibleFirstTag, consName, tp.partType)
     pure ChoiceGI {typeName, alts}
 
 data TyPartInfo = TyPartInfo
@@ -1038,10 +1057,6 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       , possibleFirstTag = [eName elt]
       }
   _ -> error "anything other than Seq or Choice inside Complex is not supported"
-
-getElement :: TyPart -> Maybe Element
-getElement (Elt e) = Just e
-getElement _ = Nothing
 
 attributeToField :: QualNamespace -> Attr -> CG FieldGI
 attributeToField quals attr = do

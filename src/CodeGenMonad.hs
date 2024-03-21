@@ -199,7 +199,7 @@ data SequenceGI = SequenceGI
 
 data ChoiceGI = ChoiceGI
   { typeName :: HaskellTypeName
-  , alts :: [(XMLString, HaskellConsName, TypeWithAttrs)]
+  , alts :: [(Maybe (XMLString, Repeatedness), [XMLString], HaskellConsName, TypeWithAttrs)]
   }
   deriving stock (Show)
 
