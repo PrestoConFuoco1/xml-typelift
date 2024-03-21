@@ -1164,6 +1164,19 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
   _x
     | isSimpleContentType gi, Just attrs <- mbAttrsExtension ->
       second GAttrContent <$> addAttrsToSimple attrs
+  GSeq seq_
+    | Just newAttrs <- mbAttrsExtension -> do
+      typeName <- getUniqueTypeName possibleName.unXmlNameWN
+      consName <- getUniqueConsName possibleName.unXmlNameWN
+      newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
+      pure
+        ( typeName
+        , GSeq $ seq_
+          { attributes = newAttrFields <> seq_.attributes
+          , typeName = typeName
+          , consName = consName
+          }
+        )
   _ -> error $ "can't extend type " <> show gi <> " and mixin " <> show mixin
   where
   isSimpleContentType = \case
