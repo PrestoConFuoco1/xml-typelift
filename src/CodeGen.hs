@@ -1162,6 +1162,7 @@ attrInfoFromGIType = \case
 mkExtendedGI :: QualNamespace -> Type -> XmlNameWN -> HaskellTypeName -> GIType -> CG (HaskellTypeName, GIType)
 mkExtendedGI quals mixin possibleName baseType gi = case gi of
   _x
+    | isEmptyExtension -> pure (baseType, gi)
     | isSimpleContentType gi, Just attrs <- mbAttrsExtension ->
       second GAttrContent <$> addAttrsToSimple attrs
   GSeq seq_
@@ -1207,6 +1208,12 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
       guard $ inner == Seq []
       NE.nonEmpty attrs
     _ -> Nothing
+
+  isEmptyExtension :: Bool
+  isEmptyExtension = case mixin of
+    Complex{attrs, inner} -> do
+      null attrs && inner `elem` [Seq [], Choice [], All []]
+    _ -> False
 
 mkEnumTypeDeclaration :: EnumGI -> (TyData, [Record])
 mkEnumTypeDeclaration en =
