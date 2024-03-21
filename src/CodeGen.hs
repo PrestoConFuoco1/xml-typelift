@@ -1165,6 +1165,19 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     | isEmptyExtension -> pure (baseType, gi)
     | isSimpleContentType gi, Just attrs <- mbAttrsExtension ->
       second GAttrContent <$> addAttrsToSimple attrs
+  GAttrContent cattrGI
+    | Just newAttrs <- mbAttrsExtension -> do
+      typeName <- getUniqueTypeName possibleName.unXmlNameWN
+      consName <- getUniqueConsName possibleName.unXmlNameWN
+      newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
+      pure
+        ( typeName
+        , GAttrContent $ cattrGI
+          { attributes = newAttrFields <> cattrGI.attributes
+          , typeName = typeName
+          , consName = consName
+          }
+        )
   GSeq seq_
     | Just newAttrs <- mbAttrsExtension -> do
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
