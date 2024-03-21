@@ -6,6 +6,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell     #-}
 {-# LANGUAGE QuasiQuotes         #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Move brackets to avoid $" #-}
 module Main(main) where
 -- module Cli(main, testExpr) where
 
@@ -89,7 +91,7 @@ processSchema Opts{..} = do
     let generator | isGenerateTypesOnly = codegen
                   | otherwise           = parserCodegen
     generatedFile <- generator generateOpts analyzed
-    let defoutputer = maybe putStrLn (\_ -> \_ -> return ()) testXmlFilename
+    let defoutputer = maybe putStrLn (\_ _ -> return ()) testXmlFilename
     maybe defoutputer writeFile outputToFile generatedFile
     maybe (return ()) (testGeneratedParser generatedFile textXmlIsPrint) testXmlFilename
 
@@ -146,7 +148,8 @@ optsParser =
              <*> switch         (long "types"                                <> help "Generate types only")
              <*> (GenerateOpts
                  <$> switch     (long "main"                                 <> help "Generate `main` function")
-                 <*> switch     (long "unsafe"                               <> help "Generate fast UNSAFE code"))
+                 <*> switch     (long "unsafe"                               <> help "Generate fast UNSAFE code")
+                 <*> optional (strOption (long "toplevel" <> metavar "TOPLEVEL" <> help "The toplevel type required to be generated")))
              <*> (optional $
                  filenameOption (long "test-document" <> metavar "FILENAME"  <> help "Path to test document (.xml file) (turn on `--main` and turn off `--types`)"))
              <*> (switch        (long "print-result"                         <> help "Print result of test document parsing"))

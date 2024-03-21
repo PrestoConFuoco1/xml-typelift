@@ -66,13 +66,14 @@ import Data.Bifunctor (Bifunctor(..))
 data GenerateOpts = GenerateOpts
     { isGenerateMainFunction :: Bool
     , isUnsafe               :: Bool
+    , topName             :: Maybe String
     } deriving Show
 
 instance ShowQ B.Builder where
   showQ = TL.unpack . TLE.decodeUtf8 . B.toLazyByteString
 
 instance Def.Default GenerateOpts where
-    def = GenerateOpts False False
+    def = GenerateOpts False False Nothing
 
 
 codegen' :: Schema -> CG () -> IO String
@@ -136,19 +137,27 @@ codegen :: GenerateOpts -> Schema -> IO String
 codegen c sch = codegen' sch $ generateParser2 False c sch
 
 generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
-generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
+generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} schema = do
     generateModuleHeading opts
     schemaTypesMap .= Map.fromList (map (first mkXmlNameWN) $ Map.toList schema.typesExtended)
     --processSchemaNamedTypes schema.types
     let quals = getSchemaQualNamespace schema
-    topNames <- forM schema.tops \el -> processType quals (Just $ mkXmlNameWN $ eName el) (eType el)
+    theSelectedTop <- case topName of
+      Nothing -> case schema.tops of
+        [] -> error "no toplevel elements"
+        [top] -> pure top
+        tops_ -> error $ "too much toplevel elements, please specify one of: " <> show (map eName tops_)
+      Just userTop -> case List.find (\e -> eName e == cs userTop) schema.tops of
+        Nothing -> error $ "toplevel type " <> show userTop <> " not found"
+        Just foundUserTop -> pure foundUserTop
+    topNameProcessed <- processType quals (Just $ mkXmlNameWN $ eName theSelectedTop) (eType theSelectedTop)
     declaredTypes <- Lens.use typeDecls
     forM_ declaredTypes \case
       Alg rec -> declareAlgebraicType rec
       Newtype (t, c, wt) -> declareNewtype t c wt
       Sumtype sumtype -> declareSumType sumtype
     when genParser do
-      outCodeLine [qc|type TopLevel = {type_ $ head topNames}|]
+      outCodeLine [qc|type TopLevel = {type_ topNameProcessed}|]
       outCodeLine [qc|-- PARSER --|]
       generateParserInternalStructures
       generateParserInternalArray1 opts schema
@@ -157,7 +166,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
       outCodeLine "-- extr --"
       outCodeLine ""
       outCodeLine ""
-      generateParserExtractTopLevel1 opts topNames
+      generateParserExtractTopLevel1 opts topNameProcessed
       outCodeLine ""
       outCodeLine ""
       outCodeLine "-- parser --"
@@ -167,8 +176,6 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction} schema = do
       generateAuxiliaryFunctions
       when isGenerateMainFunction $ generateMainFunction opts
 
-
-  
 generateParserInternalStructures :: CG ()
 generateParserInternalStructures = do
     outCodeLine [qc|-- | Internal representation of TopLevel|]
@@ -438,13 +445,12 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
 generateParserExtractTopLevel1 ::
   HasCallStack =>
   GenerateOpts ->
-  [TypeWithAttrs] ->
+  TypeWithAttrs ->
   CG ()
-generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topTypes = do
-    forM_ topTypes $ \topType -> do
-        let topTypeName = topType.type_
-        outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
-        outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
+generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
+    let topTypeName = topType.type_
+    outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
+    outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
     withIndent $ do
         outCodeLine' "where"
         extractFuncs_ <- Lens.use extractFunctions
