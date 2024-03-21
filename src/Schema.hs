@@ -114,6 +114,11 @@ data Restriction =
 instance Default Restriction where
   def = None
 
+newtype AttributeGroupType = AttributeGroupType
+  { attrs :: [Attr]
+  }
+  deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
+
 data Type =
     Ref XMLString
   | Restriction {
@@ -140,7 +145,7 @@ data Attr = Attr {
   , use   :: !Use
   , aType :: !Type
   , id    :: !(Maybe ID)
-  }
+  } | AttrGrp AttrGroupRef
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 instance Default Attr where
@@ -169,6 +174,11 @@ data TyPart = Seq    [TyPart]
 
 instance Default TyPart where
   def = Seq []
+
+newtype AttrGroupRef = AttrGroupRef
+  { ref :: XMLString
+  }
+  deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 {-
 instance NFData Attr where

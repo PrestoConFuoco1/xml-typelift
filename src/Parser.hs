@@ -78,6 +78,10 @@ instance FromXML TypeDesc where
           "all"            -> handleTyPart All
           "sequence"       -> handleTyPart Seq
           "choice"         -> handleTyPart Choice
+          "attributeGroup" -> do
+            attrGrp :: AttrGroupRef <- fromXML' node
+            return $ let TypeDesc { ty = cpl@Complex { attrs } } = tyd
+                      in  tyd      { ty = cpl { attrs = AttrGrp attrGrp:attrs } }
           _                -> unknownChildHandler "type description" node
         where
           -- Our parsing model does not take account of All vs Seq difference
@@ -90,6 +94,7 @@ instance FromXML TypeDesc where
   fromXML  node = case nodeName node of
                     "simpleType"  -> fromXML' node
                     "complexType" -> fromXML' node
+                    "attributeGroup" -> fromXML' node
                     otherName     -> ("Node expected to contain type descriptor is named '"
                                     <> otherName <> "'") `failHere` otherName
 
@@ -174,6 +179,16 @@ instance FromXML Attr where
         "form"    -> return   cpl -- ignore qualification check for now
         _other    -> unknownAttrHandler "attribute" attr
 
+instance FromXML AttrGroupRef where
+  fromXML' = makeFromXML (attrAttr, attrElt) $ AttrGroupRef ""
+    where
+      attrAttr cpl attr@(aName, aVal) = case stripNS aName of
+        "ref" -> return cpl {ref = aVal}
+        _ -> unknownAttrHandler "attributeGroup" attr
+      attrElt cpl nod = case stripNS $ nodeName nod of 
+        "annotaion" -> return cpl
+        _ -> error $ "unexpected element for attributeGroup: " <> show nod
+
 parseSchema :: BS.ByteString -> IO (Maybe Schema)
 parseSchema input = do
   --print $ skipDoctype input
@@ -210,6 +225,7 @@ schemaElt sch nod =
         return $ sch { tops = elt:tops sch }
       "simpleType"  -> handleType
       "complexType" -> handleType
+      "attributeGroup" -> handleType
       "key"         -> return sch
       "unique"      -> return sch
       "keyref"      -> return sch

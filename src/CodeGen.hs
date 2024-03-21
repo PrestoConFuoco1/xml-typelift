@@ -54,7 +54,7 @@ import Identifiers (normalizeFieldName, normalizeTypeName)
 import Data.Foldable (for_, asum)
 import TypeDecls1 (TypeDecl (..), SumType)
 import qualified Data.List.NonEmpty as NE
-import Text.Pretty.Simple ()
+import Text.Pretty.Simple (pPrint)
 import Data.Bifunctor (Bifunctor(..))
 
 --import           Debug.Pretty.Simple
@@ -830,6 +830,28 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
                  Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
                  Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
 
+lookupSchemaType :: QualNamespace -> XMLString -> CG (Namespace, (Type, QualNamespace))
+lookupSchemaType quals xmlType = do
+  schemaTypes <- Lens.use schemaTypesMap
+  let (namespaceShort, XmlNameWN -> typeName) = splitNS xmlType
+  let typesWithName =
+        withTypeNotFoundErr $
+          Map.lookup typeName schemaTypes
+  let mbNamespace = do
+        guard $ not $ BS.null namespaceShort
+        Map.lookup (Qual namespaceShort) quals
+
+  pure case mbNamespace of
+    Nothing -> do
+      let typeWithoutSchema = List.find ((== Namespace "") . fst) typesWithName
+      let singleType = guard (length typesWithName == 1) >> Just (head typesWithName)
+      withTypeNotFoundErr $ asum [typeWithoutSchema, singleType]
+    Just namespace_ -> do
+      withTypeNotFoundErr $ List.find ((== namespace_) . fst) typesWithName
+  where
+  withTypeNotFoundErr :: Maybe c -> c
+  withTypeNotFoundErr =
+    fromMaybe $ error $ "type not found: " <> cs xmlType
 
 
 lookupHaskellTypeBySchemaType :: QualNamespace -> XMLString -> CG TypeWithAttrs
@@ -962,7 +984,7 @@ processSeq mbPossibleName quals attrs seqParts = do
   mkSequenceGI possibleName tyParts = do
     typeName <- getUniqueTypeName possibleName
     consName <- getUniqueConsName possibleName
-    attrFields <- mapM (attributeToField quals) attrs
+    attrFields <- concat <$> mapM (attributeToField quals) attrs
     fields <- mapM elementToField tyParts
     pure SequenceGI
       { typeName
@@ -1058,16 +1080,24 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       }
   _ -> error "anything other than Seq or Choice inside Complex is not supported"
 
-attributeToField :: QualNamespace -> Attr -> CG FieldGI
-attributeToField quals attr = do
-  typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) $ aType attr
-  pure FieldGI
-    { haskellName = attrNameToHaskellFieldName $ aName attr
-    , xmlName = Just $ aName attr
-    --, cardinality = RepMaybe
-    , typeName
-    , inTagInfo = Nothing
-    }
+attributeToField :: QualNamespace -> Attr -> CG [FieldGI]
+attributeToField quals attr = case attr of
+  AttrGrp AttrGroupRef{ref} -> do
+    (_, (attrGroup, quals_)) <- lookupSchemaType quals ref
+    let
+      groupAttrs' = case attrGroup of
+        Complex{attrs=groupAttrs} | not (null groupAttrs) -> groupAttrs
+        other -> error $ "expected attribute group with only attributes: " <> show other
+    fmap concat $ forM groupAttrs' $ attributeToField quals_
+  Attr{aType} -> do
+    typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) aType
+    pure $ List.singleton FieldGI
+      { haskellName = attrNameToHaskellFieldName $ aName attr
+      , xmlName = Just $ aName attr
+      --, cardinality = RepMaybe
+      , typeName
+      , inTagInfo = Nothing
+      }
 
 eltNameToHaskellFieldName :: BS.ByteString -> HaskellFieldName
 eltNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
@@ -1142,13 +1172,15 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
   addAttrsToSimple attrs = do
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
     consName <- getUniqueConsName possibleName.unXmlNameWN
-    attrFields <- mapM (attributeToField quals) attrs
-    pure $ (typeName,) ContentWithAttrsGI
+    attrFields <- concat <$> mapM (attributeToField quals) attrs
+    pure 
+      ( typeName
+      , ContentWithAttrsGI
       { typeName
       , consName
-      , attributes = NE.toList attrFields
+      , attributes = attrFields
       , contentType = baseType
-      }
+      })
 
   mbAttrsExtension :: Maybe (NE.NonEmpty Attr)
   mbAttrsExtension = case mixin of
