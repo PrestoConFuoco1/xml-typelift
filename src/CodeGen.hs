@@ -579,12 +579,12 @@ generateMainFunction GenerateOpts{..} = trace "main" do
     outCodeLine' [qc|echo msg x = (msg <> ": "<> show x) `trace` x |]
 
 getSequenceAttrs :: SequenceGI -> AttributesInfo
-getSequenceAttrs s = case NE.nonEmpty $ map (.xmlName) s.attributes of
+getSequenceAttrs s = case NE.nonEmpty $ map (fromJust . (.xmlName)) s.attributes of
   Nothing -> NoAttrs
   Just a -> AttributesInfo a
 
 getExtContentAttrs :: ContentWithAttrsGI -> AttributesInfo
-getExtContentAttrs c = case NE.nonEmpty $ map (.xmlName) c.attributes of
+getExtContentAttrs c = case NE.nonEmpty $ map (fromJust . (.xmlName)) c.attributes of
   Nothing -> NoAttrs
   Just a -> AttributesInfo a
 
@@ -598,14 +598,17 @@ mkChoiceTypeDeclaration ch =
 mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
 mkSequenceTypeDeclaration s =
   (TyData $ B.byteString s.typeName.unHaskellTypeName
-  , [(TyCon $ B.byteString s.consName.unHaskellConsName, map mkFieldDeclaration $ s.attributes <> s.fields)]
+  , [ ( TyCon $ B.byteString s.consName.unHaskellConsName
+      , map mkFieldDeclaration $ map (, IsAttr True) s.attributes <> map (, IsAttr False) s.fields
+      )
+    ]
   )
 
 mkAttrContentTypeDeclaration :: ContentWithAttrsGI -> (TyData, [Record])
 mkAttrContentTypeDeclaration cgi =
   ( TyData $ B.byteString cgi.typeName.unHaskellTypeName
   , [ ( TyCon $ B.byteString cgi.consName.unHaskellConsName
-      , map mkFieldDeclaration $ cgi.attributes <> [contentField]
+      , map mkFieldDeclaration $ map (,IsAttr True) cgi.attributes <> map (, IsAttr False) [contentField]
       )
     ]
   )
@@ -615,23 +618,28 @@ mkAttrContentTypeDeclaration cgi =
     -- TODO: maybe it's not the best idea to use FieldGI here
     FieldGI
       { haskellName = "content"
-      , xmlName = "abra-schwabra-kadabra" -- should be never used
-      , cardinality = RepOnce
+      , xmlName = Nothing
       , typeName = typeNoAttrs cgi.contentType GBaseType
+      , inTagInfo = Nothing
       }
 
 
-mkFieldDeclaration :: FieldGI -> TyField
-mkFieldDeclaration fld =
+newtype IsAttr = IsAttr Bool
+
+mkFieldDeclaration :: (FieldGI, IsAttr) -> TyField
+mkFieldDeclaration (fld, IsAttr isAttr) =
   ( TyFieldName $ B.byteString fld.haskellName.unHaskellFieldName
   , TyType $ mkCardinality $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
   where
-    mkCardinality x = case fld.cardinality of
-      RepMaybe -> "Maybe " <> x
-      RepOnce -> x
-      _ -> "[" <> x <> "]"
+    mkCardinality x = case fld.inTagInfo of
+      Nothing -> if isAttr then "Maybe " <> x else x
+      Just (_, card) -> case card of
+        RepMaybe -> "Maybe " <> x
+        RepOnce -> x
+        _ -> "[" <> x <> "]"
 
+{-
 exampleSequenceGI :: SequenceGI
 exampleSequenceGI = SequenceGI
   { typeName = "TestType"
@@ -643,6 +651,7 @@ exampleSequenceGI = SequenceGI
     , FieldGI "techStops" "techStopsElt" RepMany $ typeNoAttrs "TechStop" GBaseType
     ]
   }
+-}
 
 type CodeWriter' = ReaderT Int (Writer [String])
 type CodeWriter = CodeWriter' ()
@@ -718,14 +727,18 @@ generateParseElementCall (arrOfs, strOfs) field = do
       hasAttrs = attrInfoFromGIType field.typeName.giType /= NoAttrs
       (allocator :: B.Builder, tagQModifier) =
         if hasAttrs
-        then ([qc|{getAttrsAllocatorName parsedType} {getAttrsRoutingName parsedType} |], (<> "WithAttrs"))
+        then ([qc|{getAttrsAllocatorName parsedType} {getAttrsRoutingName parsedType} |], (<> ("WithAttrs" :: String)))
         else ("", identity)
-  let tagQuantifier::XMLString = case field.cardinality of
+  let mbTagAndQuantifier = case field.inTagInfo of
+        Nothing -> Nothing
+        Just (tagName_, card) -> Just . (tagName_,) $ case card of
           RepMaybe -> "inMaybeTag"
           RepOnce  -> "inOneTag"
           _        -> "inManyTags"
-      tagName = field.xmlName
-  out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}" {arrOfs} {strOfs} {parserName}|]
+  case mbTagAndQuantifier of
+    Nothing -> out1 [qc|{parserName} {arrOfs} {strOfs}|]
+    Just (tagName, tagQuantifier) -> 
+      out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}" {arrOfs} {strOfs} {parserName}|]
 
 getAttrsRoutingName :: HaskellTypeName -> XMLString
 getAttrsRoutingName t = [qc|get{t}AttrOffset|]
@@ -800,7 +813,9 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
   where
     getExtractorNameWithQuant :: XMLString -> FieldGI -> XMLString -- ? Builder
     getExtractorNameWithQuant ofs fld = do
-        let (fieldQuantifier::(Maybe XMLString)) = case fld.cardinality of
+        let (fieldQuantifier::(Maybe XMLString)) = case fld.inTagInfo of
+              Nothing -> Nothing
+              Just (_, card) -> case card of
                 RepMaybe -> Just "extractMaybe"
                 RepOnce  -> Nothing
                 _        -> Just "extractMany" -- TODO add extractExact support
@@ -914,55 +929,96 @@ processSeq ::
   QualNamespace ->
   [Attr] ->
   [TyPart] ->
-  CG TypeWithAttrs
-processSeq mbPossibleName quals attrs seqParts = case traverse getElement seqParts of
+  CG TyPartInfo
+processSeq mbPossibleName quals attrs seqParts = do
+  underTypes <- forM seqParts (processTyPart Nothing quals False [])
+  let
+    possibleName =
+      fromMaybe "UnknownSeq" $
+        asum
+          [ unXmlNameWN <$> mbPossibleName
+          , (<> "Etc") . unHaskellTypeName . (.partType.type_) <$> listToMaybe underTypes
+          ]
+  seqGI <- mkSequenceGI possibleName underTypes
+  registerSequenceGI seqGI
+  let
+    type_ = TypeWithAttrs
+      { type_ = seqGI.typeName
+      , giType = GSeq seqGI
+      }
+  pure TyPartInfo
+    { partType = type_
+    , inTagInfo = Nothing
+    , possibleFirstTag = (head underTypes).possibleFirstTag
+    }
+{-
+  case traverse getElement seqParts of
     Nothing -> error "only sequence of elements is supported"
     Just elts -> do
       sGI <- mkSequenceGI elts
       registerSequenceGI sGI
       pure $ TypeWithAttrs sGI.typeName $ GSeq sGI
+-}
   where
-  possibleName = fromMaybe (error "processSeq:possibleName") mbPossibleName
-  mkSequenceGI :: [Element] -> CG SequenceGI
-  mkSequenceGI elts = do
-    typeName <- getUniqueTypeName possibleName.unXmlNameWN
-    consName <- getUniqueConsName possibleName.unXmlNameWN
+  mkSequenceGI :: XMLString -> [TyPartInfo] -> CG SequenceGI
+  mkSequenceGI possibleName tyParts = do
+    typeName <- getUniqueTypeName possibleName
+    consName <- getUniqueConsName possibleName
     attrFields <- mapM (attributeToField quals) attrs
-    fields <- mapM elementToField elts
+    fields <- mapM elementToField tyParts
     pure SequenceGI
       { typeName
       , consName
       , attributes = attrFields
       , fields
       }
-  elementToField :: Element -> CG FieldGI
-  elementToField elt = do
-    typeName <- processType quals (Just $ mkXmlNameWN $ eName elt) $ eType elt
+  elementToField :: TyPartInfo -> CG FieldGI
+  elementToField tyPart = do
     pure FieldGI
-      { haskellName = eltNameToHaskellFieldName $ eName elt
-      , xmlName = eName elt
-      , cardinality = eltToRepeatedness elt
-      , typeName
+      { haskellName = case tyPart.inTagInfo of
+        Nothing -> "anonymousField"
+        Just (tagName, _) -> eltNameToHaskellFieldName tagName
+      , xmlName = Nothing
+      --, cardinality = eltToRepeatedness elt
+      , typeName = tyPart.partType
+      , inTagInfo = tyPart.inTagInfo
       }
 
-processChoice :: Maybe XmlNameWN -> QualNamespace -> [TyPart] -> CG TypeWithAttrs
+processChoice ::
+  Maybe XmlNameWN ->
+  QualNamespace ->
+  [TyPart] ->
+  CG TyPartInfo
 processChoice mbPossibleName quals choiceAlts =
   case traverse getElement choiceAlts of
     Nothing -> error "only choice between elements is supported"
     Just elts -> do
-      chGI <- mkChoiceGI elts
+      let
+        possibleName = fromMaybe "UnknownChoice" $
+          asum [unXmlNameWN <$> mbPossibleName, (<> "Or") . eName <$> listToMaybe elts]
+      chGI <- mkChoiceGI possibleName elts
       registerChoiceGI chGI
-      pure $ typeNoAttrs chGI.typeName $ GChoice chGI
+      pure TyPartInfo
+        { partType = TypeWithAttrs chGI.typeName (GChoice chGI)
+        , inTagInfo = Nothing
+        , possibleFirstTag = map eName elts
+        }
+      -- pure $ typeNoAttrs chGI.typeName $ GChoice chGI
   where
-  possibleName = fromMaybe (error "processChoice:possibleName") mbPossibleName
-  mkChoiceGI :: [Element] -> CG ChoiceGI
-  mkChoiceGI elts = do
-    typeName <- getUniqueTypeName possibleName.unXmlNameWN
+  mkChoiceGI :: XMLString -> [Element] -> CG ChoiceGI
+  mkChoiceGI possibleName elts = do
+    typeName <- getUniqueTypeName possibleName
     alts <- forM elts \el -> do
       altType <- processType quals (Just $ mkXmlNameWN $ eName el) (eType el)
-      consName <- getUniqueConsName $ possibleName.unXmlNameWN <> normalizeTypeName (eName el)
+      consName <- getUniqueConsName $ possibleName <> normalizeTypeName (eName el)
       pure (eName el, consName, altType)
     pure ChoiceGI {typeName, alts}
+
+data TyPartInfo = TyPartInfo
+  { partType :: TypeWithAttrs
+  , inTagInfo :: Maybe (XMLString, Repeatedness)
+  , possibleFirstTag :: [XMLString]
+  }
 
 processTyPart ::
   Maybe XmlNameWN -> -- ^ possible name
@@ -970,10 +1026,17 @@ processTyPart ::
   Bool ->
   [Attr] ->
   TyPart ->
-  CG TypeWithAttrs
+  CG TyPartInfo
 processTyPart possibleName quals _mixed attrs inner = case inner of
   Seq seqParts -> processSeq possibleName quals attrs seqParts
   Choice choiceAlts -> processChoice possibleName quals choiceAlts
+  Elt elt -> do
+    eltType <- processType quals (Just $ mkXmlNameWN $ eName elt) (eType elt)
+    pure TyPartInfo
+      { partType = eltType
+      , inTagInfo = Just (eName elt, eltToRepeatedness elt)
+      , possibleFirstTag = [eName elt]
+      }
   _ -> error "anything other than Seq or Choice inside Complex is not supported"
 
 getElement :: TyPart -> Maybe Element
@@ -985,9 +1048,10 @@ attributeToField quals attr = do
   typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) $ aType attr
   pure FieldGI
     { haskellName = attrNameToHaskellFieldName $ aName attr
-    , xmlName = aName attr
-    , cardinality = RepMaybe
+    , xmlName = Just $ aName attr
+    --, cardinality = RepMaybe
     , typeName
+    , inTagInfo = Nothing
     }
 
 eltNameToHaskellFieldName :: BS.ByteString -> HaskellFieldName
@@ -1001,7 +1065,7 @@ processType quals mbPossibleName = \case
   Ref knownType ->
     lookupHaskellTypeBySchemaType quals knownType
   Complex{mixed, attrs, inner} ->
-    processTyPart mbPossibleName quals mixed attrs inner
+    partType <$> processTyPart mbPossibleName quals mixed attrs inner
   Restriction{base, restricted} -> case restricted of
     Enum alts -> do
       let possibleName = fromMaybe (error "anonymous enums are not supported") mbPossibleName

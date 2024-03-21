@@ -149,7 +149,7 @@ mkHaskellConsName = HaskellConsName . normalizeTypeName
 newtype FunctionBody = FunctionBody {unFunctionBody :: [String]}
 
 newtype XmlNameWN = XmlNameWN {unXmlNameWN :: XMLString}
-  deriving newtype (Eq, Ord, Show, IsString, ShowQ)
+  deriving newtype (Eq, Ord, Show, IsString, ShowQ, Semigroup)
 
 mkXmlNameWN :: XMLString -> XmlNameWN
 mkXmlNameWN = XmlNameWN . snd . splitNS
@@ -203,11 +203,12 @@ data ChoiceGI = ChoiceGI
   }
   deriving stock (Show)
 
+-- FIXME: this datatype shouldn't be used for attributes
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
-  , xmlName :: XMLString
-  , cardinality :: Repeatedness
+  , xmlName :: Maybe XMLString
   , typeName :: TypeWithAttrs
+  , inTagInfo :: Maybe (XMLString, Repeatedness)
   }
   deriving stock (Show)
 

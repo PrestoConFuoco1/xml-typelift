@@ -102,7 +102,7 @@ instance FromXML TyPart where
   fromXML node = case nodeName node of
       "choice"  ->  parseTyPart Choice node
       "all"     ->  parseTyPart All    node
-      "seq"     ->  parseTyPart Seq    node
+      "sequence"     ->  parseTyPart Seq    node
       "element" ->  Elt <$> fromXML    node
       other     -> ("Unknown type particle '" <> bshow other <> "'") `failHere` other
 
