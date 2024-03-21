@@ -160,7 +160,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
       outCodeLine [qc|type TopLevel = {type_ topNameProcessed}|]
       outCodeLine [qc|-- PARSER --|]
       generateParserInternalStructures
-      generateParserInternalArray1 opts schema
+      generateParserInternalArray1 opts theSelectedTop
       outCodeLine ""
       outCodeLine ""
       outCodeLine "-- extr --"
@@ -192,13 +192,9 @@ eltToRepeatedness (Element m Unbounded     _ _ _) = RepNotLess m
 eltToRepeatedness (Element m (MaxOccurs n) _ _ _) = RepRange m n
 
 
-generateParserInternalArray1 :: GenerateOpts -> Schema -> CG ()
-generateParserInternalArray1 GenerateOpts{isUnsafe} Schema{tops} = do
+generateParserInternalArray1 :: GenerateOpts -> Element -> CG ()
+generateParserInternalArray1 GenerateOpts{isUnsafe} topEl = do
     outCodeLine [qc|-- PARSER --|]
-    -- FIXME: examine which element is on the toplevel, if there are many
-    when (length tops /= 1) $
-      error $ "Only one element supported on toplevel: " <> show (map eName tops)
-    let topEl = head tops
     -- Generate parser header
     let topTag = eName topEl
         topName = unHaskellTypeName $ mkHaskellTypeName topTag
