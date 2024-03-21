@@ -32,6 +32,7 @@ import           Schema
 import           Errors
 import           FromXML
 import qualified Data.List as List
+import Data.String.Conversions (cs)
 
 -- * These are internal types used only for convenient class definition.
 --   Should not be exposed, but rather Schema types should be.
@@ -109,11 +110,15 @@ instance FromXML TyPart where
       "all"     ->  parseTyPart All    node
       "sequence"     ->  parseTyPart Seq    node
       "element" ->  Elt <$> fromXML    node
-      other     -> ("Unknown type particle '" <> bshow other <> "'") `failHere` other
+      other     -> ("Unknown type particle '" <> bshow other <> "'" <> cs (show node)) `failHere` other
 
 -- | Parse type particle, and fix missing attribute values in case of xs:all
 parseTyPart :: ([TyPart] -> TyPart) -> Xeno.Node -> Result TyPart
-parseTyPart cons node = (postprocess . cons) <$> mapM fromXML (Xeno.children node)
+parseTyPart cons node =
+  postprocess . cons <$>
+    mapM fromXML (filter (\n -> nodeName n `notElem` unprocessed) $ Xeno.children node)
+  where
+  unprocessed = ["annotation", "documentation"]
 
 -- | Fix missing minOccurs/maxOccurs in xs:all
 postprocess :: TyPart -> TyPart
@@ -186,7 +191,7 @@ instance FromXML AttrGroupRef where
         "ref" -> return cpl {ref = aVal}
         _ -> unknownAttrHandler "attributeGroup" attr
       attrElt cpl nod = case stripNS $ nodeName nod of 
-        "annotaion" -> return cpl
+        "annotation" -> return cpl
         _ -> error $ "unexpected element for attributeGroup: " <> show nod
 
 parseSchema :: BS.ByteString -> IO (Maybe Schema)
@@ -235,7 +240,7 @@ schemaElt sch nod =
         schemaLocation <- maybe (error "import with no namespace") pure $ List.lookup "schemaLocation" attrs
         return sch { imports = SchemaImport namespace schemaLocation : imports sch}
       -- _ -> return sch -- unknownChildHandler elt val
-      _ -> error $ show $ nodeName nod -- unknownChildHandler elt val
+      _ -> error $ show nod -- unknownChildHandler elt val
   where
     handleType = do
       TypeDesc label ty <- fromXML nod
