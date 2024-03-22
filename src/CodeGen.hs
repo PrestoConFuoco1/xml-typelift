@@ -1127,8 +1127,8 @@ processType quals mbPossibleName = \case
   Extension{base, mixin} -> do
     baseHType <- lookupHaskellTypeBySchemaType quals base
     let possibleName = fromMaybe (XmlNameWN $ baseHType.type_.unHaskellTypeName <> "Ext") mbPossibleName
-    (hType, extGI) <- mkExtendedGI quals mixin possibleName baseHType.type_ baseHType.giType
-    registerGI extGI
+    ((hType, extGI), shouldRegister) <- mkExtendedGI quals mixin possibleName baseHType.type_ baseHType.giType
+    when shouldRegister $ registerGI extGI
     pure $ TypeWithAttrs
       { type_ = hType
       , giType = extGI
@@ -1155,24 +1155,33 @@ attrInfoFromGIType = \case
   GEnum _en -> NoAttrs
   GWrapper _nwt -> NoAttrs
 
-mkExtendedGI :: QualNamespace -> Type -> XmlNameWN -> HaskellTypeName -> GIType -> CG (HaskellTypeName, GIType)
+mkExtendedGI ::
+  QualNamespace ->
+  Type ->
+  XmlNameWN ->
+  HaskellTypeName ->
+  GIType ->
+  CG ((HaskellTypeName, GIType), Bool {- should we register resulting type -} )
 mkExtendedGI quals mixin possibleName baseType gi = case gi of
   _x
-    | isEmptyExtension -> pure (baseType, gi)
+    | isEmptyExtension -> do
+      pure ((baseType, gi), False)
     | isSimpleContentType gi, Just attrs <- mbAttrsExtension ->
-      second GAttrContent <$> addAttrsToSimple attrs
+      (,True) .  second GAttrContent <$> addAttrsToSimple attrs
   GAttrContent cattrGI
     | Just newAttrs <- mbAttrsExtension -> do
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
       consName <- getUniqueConsName possibleName.unXmlNameWN
       newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
       pure
-        ( typeName
+        (( typeName
         , GAttrContent $ cattrGI
           { attributes = newAttrFields <> cattrGI.attributes
           , typeName = typeName
           , consName = consName
           }
+        )
+        , True
         )
   GSeq seq_
     | Just newAttrs <- mbAttrsExtension -> do
@@ -1180,12 +1189,14 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
       consName <- getUniqueConsName possibleName.unXmlNameWN
       newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
       pure
-        ( typeName
+        (( typeName
         , GSeq $ seq_
           { attributes = newAttrFields <> seq_.attributes
           , typeName = typeName
           , consName = consName
           }
+        )
+        , True
         )
   _ -> error $ "can't extend type " <> show gi <> " and mixin " <> show mixin
   where
