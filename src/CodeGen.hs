@@ -698,7 +698,7 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
       out1 [qc|({arrOfs'}, {strOfs'}) <- do|]
       withIndent1 do
         -- offsetsAfterAllocGen <- generateAttrsAllocation oldOffsets field.typeName
-        generateParseElementCall oldOffsets field
+        out1 $ generateParseElementCall oldOffsets field.inTagInfo field.typeName
     out1 [qc|pure ({arrRet}, {strRet})|]
 
 generateAttrsAllocation ::
@@ -722,25 +722,29 @@ generateAttrsAllocation TypeWithAttrs{type_, giType} =
     NoAttrs -> pure ()
     AttributesInfo neStr -> action neStr
 
-generateParseElementCall :: (XMLString, XMLString) -> FieldGI -> CodeWriter
-generateParseElementCall (arrOfs, strOfs) field = do
-  let parsedType = field.typeName.type_
+generateParseElementCall ::
+  (XMLString, XMLString) ->
+  Maybe (XMLString, Repeatedness) ->
+  TypeWithAttrs ->
+  String
+generateParseElementCall (arrOfs, strOfs) inTagInfo typeWithAttrs = do
+  let parsedType = typeWithAttrs.type_
       parserName = getParserNameForType parsedType
-      hasAttrs = attrInfoFromGIType field.typeName.giType /= NoAttrs
+      hasAttrs = attrInfoFromGIType typeWithAttrs.giType /= NoAttrs
       (allocator :: B.Builder, tagQModifier) =
         if hasAttrs
         then ([qc|{getAttrsAllocatorName parsedType} {getAttrsRoutingName parsedType} |], (<> ("WithAttrs" :: String)))
         else ("", identity)
-  let mbTagAndQuantifier = case field.inTagInfo of
+  let mbTagAndQuantifier = case inTagInfo of
         Nothing -> Nothing
         Just (tagName_, card) -> Just . (tagName_,) $ case card of
           RepMaybe -> "inMaybeTag"
           RepOnce  -> "inOneTag"
           _        -> "inManyTags"
   case mbTagAndQuantifier of
-    Nothing -> out1 [qc|{parserName} {arrOfs} {strOfs}|]
+    Nothing -> [qc|{parserName} {arrOfs} {strOfs}|]
     Just (tagName, tagQuantifier) -> 
-      out1 [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}" {arrOfs} {strOfs} {parserName}|]
+      [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}" {arrOfs} {strOfs} {parserName}|]
 
 getAttrsRoutingName :: HaskellTypeName -> XMLString
 getAttrsRoutingName t = [qc|get{t}AttrOffset|]
@@ -754,15 +758,12 @@ generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
     out1 [qc|let tagName = getTagName strStart|]
     out1 [qc|case tagName of|]
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((inTagInfo, possibleFirstTags, _cons, type_), altIdx) -> do
-      let altParser = getParserNameForType type_.type_
-          vecWrite {- | isUnsafe -} = "V.unsafeWrite" :: B.Builder
+      let vecWrite {- | isUnsafe -} = "V.unsafeWrite" :: B.Builder
           captureCon = [qc|{vecWrite} vec arrStart {altIdx}|] :: B.Builder
-          parseFunc = case inTagInfo of
-            Nothing -> [qc|{altParser} (arrStart+1) strStart|] :: B.Builder
-            Just (altTag, _card) -> [qc|inOneTag "{altTag}" (arrStart+1) strStart {altParser}|] -- FIXME: use cardinality
+          parseFunc1 =
+            generateParseElementCall ("(arrStart + 1)", "strStart") inTagInfo type_
       forM_ possibleFirstTags \firstTag ->
-        out1 [qc|"{firstTag}" -> {captureCon} >> {parseFunc}|]
-      -- out1 [qc|"{altTag}" -> {captureCon} >> inOneTag "{altTag}" (arrStart+1) strStart {altParser}|]
+        out1 [qc|"{firstTag}" -> {captureCon} >> {parseFunc1}|]
 
 generateChoiceExtractFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
