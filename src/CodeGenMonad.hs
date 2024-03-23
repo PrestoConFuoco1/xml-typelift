@@ -185,6 +185,7 @@ data ContentWithAttrsGI = ContentWithAttrsGI
   { typeName :: HaskellTypeName
   , consName :: HaskellConsName
   , attributes :: [FieldGI]
+  , contentFieldName :: HaskellFieldName
   , contentType :: HaskellTypeName
   }
   deriving stock (Show)

@@ -290,7 +290,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|        Nothing -> do|]
         outCodeLine' [qc|            updateFarthest tag strOfs|]
         outCodeLine' [qc|            {vecWrite} vec arrOfs 0|]
-        outCodeLine' [qc|            return (arrOfs +11, strOfs)|]
+        outCodeLine' [qc|            return (arrOfs + 1, strOfs)|]
         outCodeLine' [qc|inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do|]
         outCodeLine' [qc|    V.unsafeWrite vec arrOfs 1|]
         outCodeLine' [qc|    inOneTag' hasAttrs tag (arrOfs + 1) strOfs inParser >>= \case|]
@@ -612,11 +612,12 @@ mkAttrContentTypeDeclaration cgi =
   contentField =
     -- TODO: maybe it's not the best idea to use FieldGI here
     FieldGI
-      { haskellName = "content"
+      { haskellName = cgi.contentFieldName
       , xmlName = Nothing
       , typeName = typeNoAttrs cgi.contentType GBaseType
       , inTagInfo = Nothing
       }
+
 
 
 newtype IsAttr = IsAttr Bool
@@ -783,7 +784,8 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
         let haskellAttrName = attr.haskellName.unHaskellFieldName
         let haskellTypeName = attr.typeName.type_
         out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
-    out1 [qc|let (content, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
+    let contentField = cgi.contentFieldName
+    out1 [qc|let ({contentField}, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
 
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
@@ -1007,7 +1009,7 @@ processAttrGroup ::
   [Attr] ->
   CG TyPartInfo
 processAttrGroup quals attrs = do
-  attrFields <- concat <$> mapM (attributeToField quals) attrs
+  attrFields <- concat <$> mapM (attributeToField "" quals) attrs
   let
     q =
       GSeq SequenceGI
@@ -1054,20 +1056,21 @@ processSeq mbPossibleName quals attrs seqParts = do
   mkSequenceGI possibleName tyParts = do
     typeName <- getUniqueTypeName possibleName
     consName <- getUniqueConsName CnoRecord possibleName
-    attrFields <- concat <$> mapM (attributeToField quals) attrs
-    fields <- mapM elementToField tyParts
+    attrFields <- concat <$> mapM (attributeToField typeName quals) attrs
+    fields <- mapM (elementToField typeName) tyParts
     pure SequenceGI
       { typeName
       , consName
       , attributes = attrFields
       , fields
       }
-  elementToField :: TyPartInfo -> CG FieldGI
-  elementToField tyPart = do
+  elementToField :: HaskellTypeName -> TyPartInfo -> CG FieldGI
+  elementToField headTypeName tyPart = do
+    isogenNaming <- asks isogenNaming
     pure FieldGI
       { haskellName = case tyPart.inTagInfo of
-        Nothing -> "anonymousField"
-        Just (tagName, _) -> eltNameToHaskellFieldName tagName
+        Nothing -> mkFieldName isogenNaming headTypeName tyPart.partType.type_.unHaskellTypeName
+        Just (tagName, _) -> mkFieldName isogenNaming headTypeName tagName
       , xmlName = Nothing
       , typeName = tyPart.partType
       , inTagInfo = tyPart.inTagInfo
@@ -1137,17 +1140,25 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       }
   _ -> error "anything other than Seq or Choice inside Complex is not supported"
 
-attributeToField :: QualNamespace -> Attr -> CG [FieldGI]
-attributeToField quals attr = case attr of
+attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [FieldGI]
+attributeToField headTypeName quals attr = case attr of
   AttrGrp AttrGroupRef{ref} -> do
     TypeWithAttrs{giType} <- lookupHaskellTypeBySchemaType quals ref
+    isogenNaming <- asks isogenNaming
+    let
+      modifyFieldName field =
+        field
+          { haskellName = mkFieldName isogenNaming headTypeName field.haskellName.unHaskellFieldName
+          }
     case giType of
-      GSeq seq_ | null seq_.fields -> pure seq_.attributes
+      GSeq seq_ | null seq_.fields -> pure $ map modifyFieldName seq_.attributes
       _ -> error "expected attribute group"
   Attr{aType} -> do
     typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) aType
+    isogenNaming <- asks isogenNaming
     pure $ List.singleton FieldGI
-      { haskellName = attrNameToHaskellFieldName $ aName attr
+      -- { haskellName = attrNameToHaskellFieldName $ aName attr
+      { haskellName = mkFieldName isogenNaming headTypeName $ aName attr
       , xmlName = Just $ aName attr
       --, cardinality = RepMaybe
       , typeName
@@ -1225,7 +1236,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     | Just newAttrs <- mbAttrsExtension -> do
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
       consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
-      newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
+      newAttrFields <- concat <$> mapM (attributeToField typeName quals) newAttrs
       pure
         (( typeName
         , GAttrContent $ cattrGI
@@ -1240,7 +1251,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     | Just newAttrs <- mbAttrsExtension -> do
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
       consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
-      newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
+      newAttrFields <- concat <$> mapM (attributeToField typeName quals) newAttrs
       pure
         (( typeName
         , GSeq $ seq_
@@ -1263,9 +1274,10 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     NE.NonEmpty Attr ->
     CG (HaskellTypeName, ContentWithAttrsGI)
   addAttrsToSimple attrs = do
+    isogenNaming <- asks isogenNaming
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
     consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
-    attrFields <- concat <$> mapM (attributeToField quals) attrs
+    attrFields <- concat <$> mapM (attributeToField typeName quals) attrs
     pure 
       ( typeName
       , ContentWithAttrsGI
@@ -1273,6 +1285,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
       , consName
       , attributes = attrFields
       , contentType = baseType
+      , contentFieldName = mkFieldName isogenNaming typeName "content"
       })
 
   mbAttrsExtension :: Maybe (NE.NonEmpty Attr)
