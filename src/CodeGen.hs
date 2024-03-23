@@ -960,6 +960,27 @@ getUniqueConsName s = do
   allocatedHaskellConses %= Set.insert res
   pure res
 
+-- TODO: process attribute groups in more natural way
+processAttrGroup ::
+  QualNamespace ->
+  [Attr] ->
+  CG TyPartInfo
+processAttrGroup quals attrs = do
+  attrFields <- concat <$> mapM (attributeToField quals) attrs
+  let
+    q =
+      GSeq SequenceGI
+        { typeName = error "typeName should not be used"
+        , consName = error "consName should not be used"
+        , attributes = attrFields
+        , fields = []
+        }
+  pure TyPartInfo
+    { partType = TypeWithAttrs (error "partType should not be used") q
+    , inTagInfo = error "inTagInfo should not be used"
+    , possibleFirstTag = error "possibleFirstTag should not be used"
+    }
+
 processSeq ::
   Maybe XmlNameWN ->
   QualNamespace ->
@@ -1077,6 +1098,7 @@ processTyPart ::
   TyPart ->
   CG TyPartInfo
 processTyPart possibleName quals _mixed attrs inner = case inner of
+  Seq [] -> processAttrGroup quals attrs
   Seq seqParts -> processSeq possibleName quals attrs seqParts
   Choice choiceAlts -> processChoice possibleName quals choiceAlts
   Elt elt -> do
@@ -1091,12 +1113,10 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
 attributeToField :: QualNamespace -> Attr -> CG [FieldGI]
 attributeToField quals attr = case attr of
   AttrGrp AttrGroupRef{ref} -> do
-    (_, (attrGroup, quals_)) <- lookupSchemaType quals ref
-    let
-      groupAttrs' = case attrGroup of
-        Complex{attrs=groupAttrs} | not (null groupAttrs) -> groupAttrs
-        other -> error $ "expected attribute group with only attributes: " <> show other
-    fmap concat $ forM groupAttrs' $ attributeToField quals_
+    TypeWithAttrs{giType} <- lookupHaskellTypeBySchemaType quals ref
+    case giType of
+      GSeq seq_ | null seq_.fields -> pure seq_.attributes
+      _ -> error "expected attribute group"
   Attr{aType} -> do
     typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) aType
     pure $ List.singleton FieldGI
