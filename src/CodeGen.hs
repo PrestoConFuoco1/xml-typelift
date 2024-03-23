@@ -1044,7 +1044,7 @@ processChoice mbPossibleName quals choiceAlts = do
       fromMaybe "UnknownChoice" $
         asum
           [ unXmlNameWN <$> mbPossibleName
-          , (<> "Or") . unHaskellTypeName . (.partType.type_) <$> listToMaybe underTypes
+          , (<> "Or'") . unHaskellTypeName . (.partType.type_) <$> listToMaybe underTypes
           ]
   chGI <- mkChoiceGI possibleName underTypes
   registerChoiceGI chGI
@@ -1058,29 +1058,16 @@ processChoice mbPossibleName quals choiceAlts = do
     , inTagInfo = Nothing
     , possibleFirstTag = concatMap possibleFirstTag underTypes
     }
-
-{-
-  case traverse getElement choiceAlts of
-    Nothing -> error "only choice between elements is supported"
-    Just elts -> do
-      let
-        possibleName = fromMaybe "UnknownChoice" $
-          asum [unXmlNameWN <$> mbPossibleName, (<> "Or") . eName <$> listToMaybe elts]
-      chGI <- mkChoiceGI possibleName elts
-      registerChoiceGI chGI
-      pure TyPartInfo
-        { partType = TypeWithAttrs chGI.typeName (GChoice chGI)
-        , inTagInfo = Nothing
-        , possibleFirstTag = map eName elts
-        }
-        -}
   where
   mkChoiceGI :: XMLString -> [TyPartInfo] -> CG ChoiceGI
   mkChoiceGI possibleName tyParts = do
     typeName <- getUniqueTypeName possibleName
     alts <- forM tyParts \tp -> do
-      -- altType <- processType quals (Just $ mkXmlNameWN $ eName el) (eType el)
-      consName <- getUniqueConsName $ possibleName <> normalizeTypeName (tp.partType.type_.unHaskellTypeName)
+      let
+        altConsRaw =
+          possibleName <>
+            normalizeTypeName (maybe tp.partType.type_.unHaskellTypeName fst tp.inTagInfo)
+      consName <- getUniqueConsName altConsRaw
       pure (tp.inTagInfo, tp.possibleFirstTag, consName, tp.partType)
     pure ChoiceGI {typeName, alts}
 
