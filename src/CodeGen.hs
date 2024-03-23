@@ -15,7 +15,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE BlockArguments #-}
 -- | Here we aim to analyze the schema.
-module CodeGen(GenerateOpts(..), parserCodegen, codegen) where
+module CodeGen(GenerateOpts(..), parserCodegen, codegen, UseXmlIsogenNaming (..)) where
 
 import           Prelude                           hiding (id, lookup)
 
@@ -61,19 +61,22 @@ import Data.Bifunctor (Bifunctor(..))
 --import           Text.Pretty.Simple
 --import           Identifiers
 
+newtype UseXmlIsogenNaming = UseXmlIsogenNaming Bool
+  deriving Show
 
 -- | Options for generating
 data GenerateOpts = GenerateOpts
     { isGenerateMainFunction :: Bool
     , isUnsafe               :: Bool
-    , topName             :: Maybe String
+    , topName :: Maybe String
+    , useXmlIsogenNaming :: UseXmlIsogenNaming
     } deriving Show
 
 instance ShowQ B.Builder where
   showQ = TL.unpack . TLE.decodeUtf8 . B.toLazyByteString
 
 instance Def.Default GenerateOpts where
-    def = GenerateOpts False False Nothing
+    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False)
 
 
 codegen' :: Schema -> CG () -> IO String

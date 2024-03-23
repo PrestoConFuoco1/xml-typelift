@@ -266,7 +266,6 @@ cut act = RWS.pass $ do
     r <- RWS.listen act
     return (r, const mempty)
 
-
 newtype CG a = CG { unCG :: (RWS.RWS Schema CGOutput CGState a) }
   deriving (Functor, Applicative, Monad) -- , RWS.MonadReader, RWS.MonadWriter, RWS.MonadIO)
 
