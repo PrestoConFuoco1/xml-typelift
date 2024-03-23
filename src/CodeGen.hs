@@ -53,8 +53,8 @@ import Identifiers (normalizeFieldName, normalizeTypeName)
 import Data.Foldable (for_, asum)
 import TypeDecls1 (TypeDecl (..), SumType)
 import qualified Data.List.NonEmpty as NE
-import Text.Pretty.Simple (pPrint)
 import Data.Bifunctor (Bifunctor(..))
+import Data.Char (isDigit, isUpper, toLower)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -936,15 +936,68 @@ getUniqueName mk possibleName getSet = do
     map mk $
       possibleName : map ((possibleName <>) . cs . show) [1..100::Int]
 
+append'Xml' :: UseXmlIsogenNaming -> XMLString -> XMLString
+append'Xml' (UseXmlIsogenNaming isogenNaming) x =
+      if isogenNaming
+      then "Xml" <> normalizeTypeName x
+      else x
+
+{-
+wordChar :: Word8 -> Char
+wordChar w = chr $ fromIntegral w
+
+charWord :: Char -> Word8
+charWord = fromIntegral . ord
+-}
+
+getMainLetters :: XMLString -> XMLString
+getMainLetters = BS.map toLower . BS.filter (\c -> isDigit c || isUpper c)
+
+appendMainLetters :: UseXmlIsogenNaming -> HaskellTypeName -> XMLString -> XMLString
+appendMainLetters (UseXmlIsogenNaming isogenNaming) typeName x =
+  if isogenNaming
+  then do
+    getMainLetters typeName.unHaskellTypeName <> norm
+  else typeName.unHaskellTypeName <> norm
+  where norm = normalizeTypeName x
+
+appendTypeName :: UseXmlIsogenNaming -> HaskellTypeName -> XMLString -> XMLString
+appendTypeName (UseXmlIsogenNaming isogenNaming) typeName x =
+  if isogenNaming
+  then typeName.unHaskellTypeName <> normalizeTypeName x
+  else x
+
 getUniqueTypeName :: XMLString -> CG HaskellTypeName
-getUniqueTypeName s = do
-  res <- getUniqueName mkHaskellTypeName s getAllocatedHaskellTypes
+getUniqueTypeName raw = do
+  isogenNaming <- asks isogenNaming
+  let
+    getRaw' =
+      mkHaskellTypeName . append'Xml' isogenNaming
+  res <- getUniqueName getRaw' raw getAllocatedHaskellTypes
   allocatedHaskellTypes %= Set.insert res
   pure res
 
-getUniqueConsName :: XMLString -> CG HaskellConsName
-getUniqueConsName s = do
-  res <- getUniqueName mkHaskellConsName s getAllocatedHaskellConstructors
+mkFieldName :: UseXmlIsogenNaming -> HaskellTypeName -> XMLString -> HaskellFieldName
+mkFieldName (UseXmlIsogenNaming isogenNaming) typeName x =
+    HaskellFieldName $
+    if isogenNaming
+      then getMainLetters typeName.unHaskellTypeName <> normalizeTypeName x
+      else x
+
+data ConsNameOption
+  = CnoRecord
+  | CnoSum HaskellTypeName
+  | CnoEnum HaskellTypeName
+
+getUniqueConsName :: ConsNameOption -> XMLString -> CG HaskellConsName
+getUniqueConsName cno s = do
+  isogenNaming <- asks isogenNaming
+  let
+    modifierFunc = mkHaskellConsName . case cno of
+      CnoRecord -> append'Xml' isogenNaming
+      CnoSum typeName -> appendMainLetters isogenNaming typeName
+      CnoEnum typeName -> appendTypeName isogenNaming typeName
+  res <- getUniqueName modifierFunc s getAllocatedHaskellConstructors
   allocatedHaskellConses %= Set.insert res
   pure res
 
@@ -1000,7 +1053,7 @@ processSeq mbPossibleName quals attrs seqParts = do
   mkSequenceGI :: XMLString -> [TyPartInfo] -> CG SequenceGI
   mkSequenceGI possibleName tyParts = do
     typeName <- getUniqueTypeName possibleName
-    consName <- getUniqueConsName possibleName
+    consName <- getUniqueConsName CnoRecord possibleName
     attrFields <- concat <$> mapM (attributeToField quals) attrs
     fields <- mapM elementToField tyParts
     pure SequenceGI
@@ -1053,9 +1106,8 @@ processChoice mbPossibleName quals choiceAlts = do
     alts <- forM tyParts \tp -> do
       let
         altConsRaw =
-          possibleName <>
             normalizeTypeName (maybe tp.partType.type_.unHaskellTypeName fst tp.inTagInfo)
-      consName <- getUniqueConsName altConsRaw
+      consName <- getUniqueConsName (CnoSum typeName) altConsRaw
       pure (tp.inTagInfo, tp.possibleFirstTag, consName, tp.partType)
     pure ChoiceGI {typeName, alts}
 
@@ -1118,7 +1170,7 @@ processType quals mbPossibleName = \case
     Enum alts -> do
       let possibleName = fromMaybe (error "anonymous enums are not supported") mbPossibleName
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
-      constrs <- forM alts \alt -> (alt,) <$> getUniqueConsName alt
+      constrs <- forM alts \alt -> (alt,) <$> getUniqueConsName (CnoEnum typeName) alt
       let
         enum_ = EnumGI {typeName, constrs}
       registerEnumGI enum_
@@ -1141,7 +1193,7 @@ processType quals mbPossibleName = \case
         possibleName =
           fromMaybe (mkXmlNameWN $ base <> "Wrapper") mbPossibleName
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
-      consName <- getUniqueConsName possibleName.unXmlNameWN
+      consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
       wrappedType <- lookupHaskellTypeBySchemaType quals base
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
@@ -1172,7 +1224,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
   GAttrContent cattrGI
     | Just newAttrs <- mbAttrsExtension -> do
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
-      consName <- getUniqueConsName possibleName.unXmlNameWN
+      consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
       newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
       pure
         (( typeName
@@ -1187,7 +1239,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
   GSeq seq_
     | Just newAttrs <- mbAttrsExtension -> do
       typeName <- getUniqueTypeName possibleName.unXmlNameWN
-      consName <- getUniqueConsName possibleName.unXmlNameWN
+      consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
       newAttrFields <- concat <$> mapM (attributeToField quals) newAttrs
       pure
         (( typeName
@@ -1212,7 +1264,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     CG (HaskellTypeName, ContentWithAttrsGI)
   addAttrsToSimple attrs = do
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
-    consName <- getUniqueConsName possibleName.unXmlNameWN
+    consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
     attrFields <- concat <$> mapM (attributeToField quals) attrs
     pure 
       ( typeName
