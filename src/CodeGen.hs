@@ -160,7 +160,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
       outCodeLine [qc|type TopLevel = {type_ topNameProcessed}|]
       outCodeLine [qc|-- PARSER --|]
       generateParserInternalStructures
-      generateParserInternalArray1 opts theSelectedTop
+      generateParserInternalArray1 opts (theSelectedTop, topNameProcessed)
       outCodeLine ""
       outCodeLine ""
       outCodeLine "-- extr --"
@@ -192,14 +192,15 @@ eltToRepeatedness (Element m Unbounded     _ _ _) = RepNotLess m
 eltToRepeatedness (Element m (MaxOccurs n) _ _ _) = RepRange m n
 
 
-generateParserInternalArray1 :: GenerateOpts -> Element -> CG ()
-generateParserInternalArray1 GenerateOpts{isUnsafe} topEl = do
+generateParserInternalArray1 :: GenerateOpts -> (Element, TypeWithAttrs) -> CG ()
+generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
     outCodeLine [qc|-- PARSER --|]
     -- Generate parser header
     let topTag = eName topEl
         topName = unHaskellTypeName $ mkHaskellTypeName topTag
     when (minOccurs topEl /= 1) $ parseErrorBs topName [qc|Wrong minOccurs = {minOccurs topEl}|]
     when (maxOccurs topEl /= MaxOccurs 1) $ parseErrorBs topName [qc|Wrong maxOccurs = {maxOccurs topEl}|]
+    let repeatedness = RepOnce
     outCodeLine' [qc|parseTopLevelToArray :: ByteString -> Either String TopLevelInternal|]
     outCodeLine' [qc|parseTopLevelToArray bs = Right $ TopLevelInternal bs $ V.create $ do|]
     withIndent $ do
@@ -212,7 +213,11 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} topEl = do
             outCodeLine' [qc|parse{topName} vec = do|]
             withIndent $ do
                 outCodeLine' [qc|{vecWrite} vec (0::Int) (0::Int)|]
-                outCodeLine' [qc|(_, _) <- inOneTag "{topTag}" 0 (skipSpaces $ skipHeader $ skipSpaces 0) parse{topName}Content|]
+                outCodeLine' [qc|let arrOfs0 = 0|]
+                outCodeLine' [qc|let strOfs0 = (skipSpaces $ skipHeader $ skipSpaces 0)|]
+                let
+                  parseElementCall = generateParseElementCall ("arrOfs0", "strOfs0") (Just (topTag, repeatedness)) topType
+                outCodeLine' [qc|(_, _) <- {parseElementCall}|]
                 outCodeLine' [qc|return ()|]
                 outCodeLine' [qc|where|]
                 parseFuncs_ <- Lens.use parseFunctions
@@ -392,7 +397,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} topEl = do
         outCodeLine' [qc|parseXMLStringContent = parseString|]
         outCodeLine' [qc|parseAttrContent arrAttrLocation strStart = do|]
         outCodeLine' [qc|  let strEnd = skipTo dquoteChar strStart|]
-        outCodeLine' [qc|  when (arrAttrLocation > 0) do|]
+        outCodeLine' [qc|  when (arrAttrLocation >= 0) do|]
         outCodeLine' [qc|    V.unsafeWrite vec arrAttrLocation     strStart|]
         outCodeLine' [qc|    V.unsafeWrite vec (arrAttrLocation+1) (strEnd - strStart)|]
         outCodeLine' [qc|  return strEnd|]
