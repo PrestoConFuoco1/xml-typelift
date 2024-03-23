@@ -25,6 +25,9 @@ module CodeGenMonad(-- Code generation monad
                     CG
                    ,CGOutput
                    ,CGOutputEntity(..)
+                   ,Env (..)
+                   ,UseXmlIsogenNaming (..)
+                   ,GenerateOpts (..)
                    ,runCodeGen
                    ,out
                    ,out'
@@ -44,7 +47,6 @@ module CodeGenMonad(-- Code generation monad
                    -- Translating identifiers
                    ,TargetIdNS(..)
                    ,XMLIdNS   (..)
-                   ,getTypeFromSchema
 
                    -- Utilities
                    ,builderUnlines
@@ -266,7 +268,7 @@ cut act = RWS.pass $ do
     r <- RWS.listen act
     return (r, const mempty)
 
-newtype CG a = CG { unCG :: (RWS.RWS Schema CGOutput CGState a) }
+newtype CG a = CG { unCG :: RWS.RWS Env CGOutput CGState a }
   deriving (Functor, Applicative, Monad) -- , RWS.MonadReader, RWS.MonadWriter, RWS.MonadIO)
 
 instance RWS.MonadState CGState CG where
@@ -279,7 +281,26 @@ instance RWS.MonadWriter CGOutput CG where
   listen = CG . RWS.listen . unCG
   pass   = CG . RWS.pass   . unCG
 
-instance RWS.MonadReader Schema CG where
+newtype UseXmlIsogenNaming = UseXmlIsogenNaming Bool
+  deriving Show
+
+-- | Options for generating
+data GenerateOpts = GenerateOpts
+    { isGenerateMainFunction :: Bool
+    , isUnsafe               :: Bool
+    , topName :: Maybe String
+    , useXmlIsogenNaming :: UseXmlIsogenNaming
+    } deriving Show
+
+instance Default GenerateOpts where
+    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False)
+
+data Env = Env
+  { isogenNaming :: UseXmlIsogenNaming
+  , schema :: Schema
+  }
+
+instance RWS.MonadReader Env CG where
   reader f = CG (RWS.reader f)
   ask    = CG RWS.ask
   -- local  = CG RWS.local
@@ -329,16 +350,9 @@ builderUnlines :: [B.Builder] -> B.Builder
 builderUnlines []     = ""
 builderUnlines (l:ls) = l <> mconcat (("\n" <>) <$> ls)
 
-
-getTypeFromSchema :: XMLString -> CG (Maybe Type)
-getTypeFromSchema name = do
-  -- TODO use better lens
-  Map.lookup name <$> RWS.asks types
-
-
 -- | Make builder to generate schema code.
-runCodeGen :: Schema -> CG () -> CGOutput
-runCodeGen sch (CG rws) = case RWS.runRWS rws sch initialState of
+runCodeGen :: UseXmlIsogenNaming -> Schema -> CG () -> CGOutput
+runCodeGen isogenNaming sch (CG rws) = case RWS.runRWS rws (Env isogenNaming sch) initialState of
                             ((), _state, output) -> output
 
 -- | Convert builder back to String, if you need to examine the content.

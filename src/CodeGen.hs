@@ -23,7 +23,6 @@ import Data.String.Conversions
 import           Control.Monad
 import qualified Data.ByteString.Builder           as B
 import qualified Data.ByteString.Char8             as BS
-import           Data.Default                      as Def
 import qualified Data.Map.Strict                   as Map
 import           Data.Maybe
 import qualified Data.Set                          as Set
@@ -61,27 +60,12 @@ import Data.Bifunctor (Bifunctor(..))
 --import           Text.Pretty.Simple
 --import           Identifiers
 
-newtype UseXmlIsogenNaming = UseXmlIsogenNaming Bool
-  deriving Show
-
--- | Options for generating
-data GenerateOpts = GenerateOpts
-    { isGenerateMainFunction :: Bool
-    , isUnsafe               :: Bool
-    , topName :: Maybe String
-    , useXmlIsogenNaming :: UseXmlIsogenNaming
-    } deriving Show
-
 instance ShowQ B.Builder where
   showQ = TL.unpack . TLE.decodeUtf8 . B.toLazyByteString
 
-instance Def.Default GenerateOpts where
-    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False)
-
-
-codegen' :: Schema -> CG () -> IO String
-codegen' sch gen = do
-    let output = runCodeGen sch gen
+codegen' :: UseXmlIsogenNaming -> Schema -> CG () -> IO String
+codegen' isogenNaming sch gen = do
+    let output = runCodeGen isogenNaming sch gen
     codeLines <- mapM outputToString output
     return $ unlines codeLines
   where
@@ -101,7 +85,7 @@ parserCodegen opts sch = do
     --putStrLn "~~~~~~ Schema tops: ~~~~~~~~~"
     --pPrint (tops sch)
     --putStrLn "~~~~~~~~~~~~~~~~~~~~~~~~"
-    codegen' sch $ do
+    codegen' opts.useXmlIsogenNaming sch $ do
       -- generateParser1 opts sch
       generateParser2 True opts sch
       pure ()
@@ -137,7 +121,8 @@ withIndent act = do -- TODO use `bracket`
     return r
 
 codegen :: GenerateOpts -> Schema -> IO String
-codegen c sch = codegen' sch $ generateParser2 False c sch
+codegen c sch =
+  codegen' c.useXmlIsogenNaming sch $ generateParser2 False c sch
 
 generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
 generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} schema = do
