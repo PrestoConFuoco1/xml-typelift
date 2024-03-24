@@ -30,16 +30,19 @@ import           Schema
 
 -- | Module prologue to import all standard types
 basePrologue :: (IsString a, Semigroup a, Monoid a) => Bool -> a
-basePrologue isUnsafe = (mconcat $ map makeImport modules) <> "\n" <> mconcat baseTypes
+basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> mconcat baseTypes
   where
     makeImport modPath = "import " <> modPath <> "\n"
-    modules = ["Data.Time.LocalTime(ZonedTime)"
+    modules = ["Data.Time.LocalTime(ZonedTime, TimeOfDay)"
+              ,"Data.Time.Format.ISO8601(iso8601ParseM)"
               ,"Data.Int(Int64)"
               ,if isUnsafe then "Data.Scientific (Scientific)" else "Data.Scientific.Safe (Scientific)"
               ,"Data.Time.ISO8601.Duration"
               -- ,"FromXML"
               ,"Errors"
-              ,"Data.Time.Calendar(Day)"
+              ,"qualified Data.Char"
+              ,"Data.Time.Calendar(Day, Year, MonthOfYear, toGregorian)"
+              ,"Data.Time.Calendar.Month"
               ,"Data.Time.Clock"
               -- TODO check imports:
               ,"Control.DeepSeq"
@@ -95,28 +98,35 @@ baseTranslations =
     ,("long"           , "Int64"        ) -- or Int64
     ,("duration"       , "Duration"     ) -- TODO: ISO8601 with minor deviations
                                           -- https://www.w3.org/TR/xmlschema-2/#deviantformats
-    ,("gYearMonth"     , "Day"          ) -- TODO: shall parse as month and year!
-    ,("gYear"          , "Day"          ) -- TODO: shall parse as Gregorian year!
-    ,("gMonth"         , "Day"          ) -- TODO: shall parse as month
-    ,("hexBinary"      , "BS.ByteString") -- TODO: add hex decoding
-    ,("base64Binary"   , "BS.ByteString") -- TODO: add hex decoding
-    ,("anyURI"         , "BS.ByteString") -- TODO: add hex decoding
+    ,("gYearMonth"     , "GYearMonth")
+    ,("gYear"          , "GYear")
+    ,("gMonth"         , "GMonth")
+    ,("hexBinary"      , "XMLString") -- TODO: add hex decoding
+    ,("base64Binary"   , "XMLString") -- TODO: add hex decoding
+    ,("anyURI"         , "XMLString") -- TODO: add hex decoding
     ,("token"          , "XMLString"    )
     ,("integer"        , "Integer"      ) -- or Integer
     ,("int"            , "Int"          ) -- or Integer
     ,("positiveInteger", "Integer"      ) -- or Integer
     ,("float"          , "Float"        )
     ,("date"           , "Day"          )
-    ,("time"           , "DiffTime"     )
+    ,("time"           , "TimeOfDay"     )
     ,("dateTime"       , "ZonedTime"    )
     ,("decimal"        , "Scientific"   )
     ,("double"         , "Double"       )
     ,("QName"          , "XMLString"    ) -- TODO: split namespace from QNames
     ,("NOTATION"       , "XMLString"    ) -- TODO: we ignore <xs:notation> definitions?
-    ,(""               , "TopLevel"     ) -- Document toplevel for the parser
     ]
-  where
-    addNS (a, b) = ("xs:" <> a, b)
+
+{-
+duration - P1Y2M3DT10H30M20S - ok, P1Y2M3DT10H30M20.3S, -P1Y2M3DT10H30M20S - not ok
+gYearMonth - ok
+gYear - ok
+gMonth - can't be parsed using standard ParseTime typeclass, added small parser
+date - can use Read instance, but it doesn't handle timezones
+time - 09:30:10.5 is parsed, but 09:30:10.5 is not i.e. second fractions are not supported
+dateTime - parses everything except the Z timezone
+-}
 
 -- | Check if builder makes Haskell base type
 isBaseHaskellType :: XMLString -> Bool

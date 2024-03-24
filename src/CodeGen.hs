@@ -55,6 +55,7 @@ import TypeDecls1 (TypeDecl (..), SumType)
 import qualified Data.List.NonEmpty as NE
 import Data.Bifunctor (Bifunctor(..))
 import Data.Char (isDigit, isUpper, toLower)
+import Data.List (isPrefixOf)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -398,10 +399,15 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|parseScientificContent = parseString|]
         outCodeLine' [qc|parseDateTimeContent = parseString|]
         outCodeLine' [qc|parseDurationContent = parseString|]
+        outCodeLine' [qc|parseGYearMonthContent = parseString|]
+        outCodeLine' [qc|parseGYearContent = parseString|]
+        outCodeLine' [qc|parseGMonthContent = parseString|]
         outCodeLine' [qc|parseIntegerContent = parseString|]
         outCodeLine' [qc|parseIntContent = parseString|]
         outCodeLine' [qc|parseInt64Content = parseString|]
         outCodeLine' [qc|parseDayContent = parseString|]
+        outCodeLine' [qc|parseTimeOfDayContent = parseString|]
+        outCodeLine' [qc|parseZonedTimeContent = parseString|]
         outCodeLine' [qc|parseBooleanContent = parseString|]
         outCodeLine' [qc|skipSpaces ofs|]
         outCodeLine' [qc|  | isSpaceChar (bs `{bsIndex}` ofs) = skipSpaces (ofs + 1)|]
@@ -438,6 +444,10 @@ generateParserExtractTopLevel1 ::
   CG ()
 generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
     let topTypeName = topType.type_
+    outCodeLine' [qc|type GYearMonth = Month|]
+    outCodeLine' [qc|type GYear = Year|]
+    outCodeLine' [qc|type GMonth = MonthOfYear|]
+    outCodeLine' [qc||]
     outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
     outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
     withIndent $ do
@@ -474,6 +484,16 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
         outCodeLine' [qc|extractDateTimeContent = extractAndParse zonedTimeStr|]
         outCodeLine' [qc|extractDayContent :: Int -> (Day, Int)|]
         outCodeLine' [qc|extractDayContent = extractReadInst|]
+        outCodeLine' [qc|extractGYearMonthContent :: Int -> (GYearMonth, Int)|]
+        outCodeLine' [qc|extractGYearMonthContent = extractAndParse (readStringMaybe $ parseTimeM True defaultTimeLocale "%Y-%-m")|]
+        outCodeLine' [qc|extractGYearContent :: Int -> (GYear, Int)|]
+        outCodeLine' [qc|extractGYearContent = extractReadInst|]
+        outCodeLine' [qc|extractGMonthContent :: Int -> (GMonth, Int)|]
+        outCodeLine' [qc|extractGMonthContent = extractAndParse $ readStringMaybe parseGMonthRaw|]
+        outCodeLine' [qc|extractTimeOfDayContent :: Int -> (TimeOfDay, Int)|]
+        outCodeLine' [qc|extractTimeOfDayContent = extractAndParse (readStringMaybe iso8601ParseM)|]
+        outCodeLine' [qc|extractZonedTimeContent :: Int -> (ZonedTime, Int)|]
+        outCodeLine' [qc|extractZonedTimeContent = extractAndParse (readStringMaybe iso8601ParseM)|]
         outCodeLine' [qc|extractDurationContent :: Int -> (Duration, Int)|]
         outCodeLine' [qc|extractDurationContent = extractAndParse parseDuration|]
         outCodeLine' [qc|extractScientificContent :: Int -> (Scientific, Int)|]
@@ -503,6 +523,23 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
         outCodeLine' [qc|    case reads (BSC.unpack str) of|]
         outCodeLine' [qc|        [(a, [])] -> Right a|]
         outCodeLine' [qc|        _ -> Left $ "Can't parse " ++ show str|]
+        outCodeLine' [qc|readStringMaybe :: (String -> Maybe a) -> ByteString -> Either String a|]
+        outCodeLine' [qc|readStringMaybe strParser input =|]
+        outCodeLine' [qc|  case strParser (BSC.unpack input) of|]
+        outCodeLine' [qc|    Just res -> pure res|]
+        outCodeLine' [qc|    Nothing -> Left $ "Can't parse " ++ show input|]
+        outCodeLine' [qc|fst3 (x, _, _) = x|]
+        outCodeLine' [qc|snd3 (_, y, _) = y|]
+        outCodeLine' [qc|thrd3 (_, _, z) = z|]
+        outCodeLine' [qc|dayYear = fst3 . toGregorian|]
+        outCodeLine' [qc|dayMonthOfYear = snd3 . toGregorian|]
+        outCodeLine' [qc|parseGMonthRaw str =|]
+        outCodeLine' [qc|  let stripped = dropWhile Data.Char.isSpace str in|]
+        outCodeLine' [qc|  if "--" `isPrefixOf` stripped|]
+        outCodeLine' [qc|  then fmap dayMonthOfYear $ parseTimeM True defaultTimeLocale "%-m" $ drop 2 stripped|]
+        outCodeLine' [qc|  else Nothing|]
+
+
     index | isUnsafe  = "`V.unsafeIndex`" :: String
           | otherwise = "V.!"
 
