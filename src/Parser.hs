@@ -83,6 +83,9 @@ instance FromXML TypeDesc where
             attrGrp :: AttrGroupRef <- fromXML' node
             return $ let TypeDesc { ty = cpl@Complex { attrs } } = tyd
                       in  tyd      { ty = cpl { attrs = AttrGrp attrGrp:attrs } }
+          "list" -> do
+            let itemType = fromMaybe (error "list type without itemType reference") $ List.lookup "itemType" $ attributes node
+            return $ tyd {ty = ListType itemType}
           _                -> unknownChildHandler "type description" node
         where
           -- Our parsing model does not take account of All vs Seq difference

@@ -84,9 +84,9 @@ processSchema Opts{..} = do
     -- schema <- fromMaybe (error "no schema parse") <$> parseSchema input
     schema <- processSchemaRec schemaFilename
     -- print $ typesExtended schema
-    let (flattened, msgs) = flatten schema
-    forM_ msgs $ hPrint stderr
-    let (analyzed, schemaErrors) = analyze flattened
+    -- let (flattened, msgs) = flatten schema
+    -- forM_ msgs $ hPrint stderr
+    let (analyzed, schemaErrors) = analyze schema -- flattened
     null schemaErrors `unless` printExceptions input schemaErrors
     let generator | isGenerateTypesOnly = codegen
                   | otherwise           = parserCodegen

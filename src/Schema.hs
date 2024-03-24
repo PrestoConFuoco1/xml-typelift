@@ -129,6 +129,9 @@ data Type =
         base  :: !XMLString
       , mixin :: !Type
       } -- ^ Extension of complexType
+  | ListType {
+      itemTypeRef :: !XMLString
+      }
   | Complex {
         mixed :: !Bool
       , attrs :: ![Attr]

@@ -55,7 +55,6 @@ import TypeDecls1 (TypeDecl (..), SumType)
 import qualified Data.List.NonEmpty as NE
 import Data.Bifunctor (Bifunctor(..))
 import Data.Char (isDigit, isUpper, toLower)
-import Data.List (isPrefixOf)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -401,6 +400,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|parseDurationContent = parseString|]
         outCodeLine' [qc|parseGYearMonthContent = parseString|]
         outCodeLine' [qc|parseGYearContent = parseString|]
+        outCodeLine' [qc|parseBoolContent = parseString|]
         outCodeLine' [qc|parseGMonthContent = parseString|]
         outCodeLine' [qc|parseIntegerContent = parseString|]
         outCodeLine' [qc|parseIntContent = parseString|]
@@ -478,43 +478,47 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
         outCodeLine' [qc|    extractMany' ofs len =|]
         outCodeLine' [qc|      let (v, ofs') = subextr ofs|]
         outCodeLine' [qc|      in first (v:) $ extractMany' ofs' (len - 1)|]
-        outCodeLine' [qc|extractTokenContent = extractStringContent|]
         outCodeLine' [qc|extractXMLStringContent = extractStringContent|]
         outCodeLine' [qc|extractDateTimeContent :: Int -> (ZonedTime, Int)|]
         outCodeLine' [qc|extractDateTimeContent = extractAndParse zonedTimeStr|]
-        outCodeLine' [qc|extractDayContent :: Int -> (Day, Int)|]
-        outCodeLine' [qc|extractDayContent = extractReadInst|]
-        outCodeLine' [qc|extractGYearMonthContent :: Int -> (GYearMonth, Int)|]
-        outCodeLine' [qc|extractGYearMonthContent = extractAndParse (readStringMaybe $ parseTimeM True defaultTimeLocale "%Y-%-m")|]
-        outCodeLine' [qc|extractGYearContent :: Int -> (GYear, Int)|]
-        outCodeLine' [qc|extractGYearContent = extractReadInst|]
-        outCodeLine' [qc|extractGMonthContent :: Int -> (GMonth, Int)|]
-        outCodeLine' [qc|extractGMonthContent = extractAndParse $ readStringMaybe parseGMonthRaw|]
-        outCodeLine' [qc|extractTimeOfDayContent :: Int -> (TimeOfDay, Int)|]
-        outCodeLine' [qc|extractTimeOfDayContent = extractAndParse (readStringMaybe iso8601ParseM)|]
-        outCodeLine' [qc|extractZonedTimeContent :: Int -> (ZonedTime, Int)|]
-        outCodeLine' [qc|extractZonedTimeContent = extractAndParse (readStringMaybe iso8601ParseM)|]
-        outCodeLine' [qc|extractDurationContent :: Int -> (Duration, Int)|]
-        outCodeLine' [qc|extractDurationContent = extractAndParse parseDuration|]
-        outCodeLine' [qc|extractScientificContent :: Int -> (Scientific, Int)|]
-        outCodeLine' [qc|extractScientificContent = extractReadInst|]
-        outCodeLine' [qc|extractIntegerContent :: Int -> (Integer, Int)|]
-        outCodeLine' [qc|extractIntegerContent = extractReadInst|]
-        outCodeLine' [qc|extractIntContent :: Int -> (Int, Int)|]
-        outCodeLine' [qc|extractIntContent = extractReadInst|]
-        outCodeLine' [qc|extractInt64Content :: Int -> (Int64, Int)|]
-        outCodeLine' [qc|extractInt64Content = extractReadInst|]
-        outCodeLine' [qc|extractBoolContent :: Int -> (Bool, Int)|]
-        outCodeLine' [qc|extractBoolContent ofs = first (\case|]
-        outCodeLine' [qc|    "true" -> True|]
-        outCodeLine' [qc|    "1"    -> True|]
-        outCodeLine' [qc|    _      -> False|]
-        outCodeLine' [qc|    ) $ extractStringContent ofs|]
+        let
+          typesUsingReadInstance = 
+            ["Day", "GYear", "Scientific", "Integer", "Int", "Int64"] :: [String]
+          typesUsingCustomParsers :: [(String, String)] =
+            [ ("GYearMonth", "(readStringMaybe $ parseTimeM True defaultTimeLocale \"%Y-%-m\")")
+            , ("GMonth", "(readStringMaybe parseGMonth)")
+            , ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
+            , ("ZonedTime", "(readStringMaybe iso8601ParseM)")
+            , ("Duration", "parseDuration")
+            ]
+          mkParseRawTypeSig :: String -> String
+          mkParseRawTypeSig t = [qc|parse{t}Raw :: ByteString -> Either String {t}|]
+          readInstanceParseRawBody :: String -> String
+          readInstanceParseRawBody t = [qc|parse{t}Raw = readEither|]
+          mkCustomParseRawBody :: String -> String -> String
+          mkCustomParseRawBody t parse_ = [qc|parse{t}Raw = {parse_}|]
+        for_ typesUsingReadInstance \t -> do
+          outCodeLine' $ mkParseRawTypeSig t
+          outCodeLine' $ readInstanceParseRawBody t
+        for_ typesUsingCustomParsers \(t, p) -> do
+          outCodeLine' $ mkParseRawTypeSig t
+          outCodeLine' $ mkCustomParseRawBody t p
+        for_ ("Bool" : typesUsingReadInstance <> map fst typesUsingCustomParsers) \t -> do
+          outCodeLine' [qc|extract{t}Content :: Int -> ({t}, Int)|]
+          outCodeLine' [qc|extract{t}Content = extractAndParse parse{t}Raw|]
+        outCodeLine' [qc|parseXMLStringRaw :: ByteString -> Either String ByteString|]
+        outCodeLine' [qc|parseXMLStringRaw = pure|]
+
+        outCodeLine' [qc|parseBoolRaw = \case|]
+        outCodeLine' [qc|    "true" -> Right True|]
+        outCodeLine' [qc|    "1" -> Right True|]
+        outCodeLine' [qc|    "false"-> Right False|]
+        outCodeLine' [qc|    "0" -> Right False|]
+        outCodeLine' [qc|    unexp -> Left $ "unexpected bool value: " <> show unexp|]
         outCodeLine' [qc|first f (a,b) = (f a, b)|]
         outCodeLine' [qc|extractAndParse :: (ByteString -> Either String a) -> Int -> (a, Int)|]
         outCodeLine' [qc|extractAndParse parser ofs = first (catchErr ofs parser) $ extractStringContent ofs|]
-        outCodeLine' [qc|extractReadInst :: (Read a) => Int -> (a, Int)|]
-        outCodeLine' [qc|extractReadInst = extractAndParse readEither|]
+
         outCodeLine' [qc|catchErr :: Int -> (ByteString -> Either String b) -> ByteString -> b|]
         outCodeLine' [qc|catchErr ofs f str = either (\msg -> parseError bsofs bs msg) id (f str)|]
         outCodeLine' [qc|  where bsofs = arr {index} ofs|]
@@ -533,7 +537,7 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
         outCodeLine' [qc|thrd3 (_, _, z) = z|]
         outCodeLine' [qc|dayYear = fst3 . toGregorian|]
         outCodeLine' [qc|dayMonthOfYear = snd3 . toGregorian|]
-        outCodeLine' [qc|parseGMonthRaw str =|]
+        outCodeLine' [qc|parseGMonth str =|]
         outCodeLine' [qc|  let stripped = dropWhile Data.Char.isSpace str in|]
         outCodeLine' [qc|  if "--" `isPrefixOf` stripped|]
         outCodeLine' [qc|  then fmap dayMonthOfYear $ parseTimeM True defaultTimeLocale "%-m" $ drop 2 stripped|]
@@ -1234,7 +1238,14 @@ processType quals mbPossibleName = \case
       { type_ = hType
       , giType = extGI
       }
-  -- t -> error $ "not ref and complex, not supported: " <> show t
+  ListType{itemTypeRef} -> do
+    itemType <- lookupHaskellTypeBySchemaType quals itemTypeRef
+    let possibleName = fromMaybe (XmlNameWN $ itemType.type_.unHaskellTypeName <> "List") mbPossibleName
+    typeName <- getUniqueTypeName possibleName.unXmlNameWN
+    consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
+    let listGI = ListGI {typeName, consName, itemType = itemType.type_}
+    registerListGI listGI
+    pure $ TypeWithAttrs typeName $ GList listGI
   where
   processAsNewtype base = do
       let
@@ -1255,6 +1266,7 @@ attrInfoFromGIType = \case
   GChoice _ch -> NoAttrs
   GEnum _en -> NoAttrs
   GWrapper _nwt -> NoAttrs
+  GList {} -> NoAttrs
 
 mkExtendedGI ::
   QualNamespace ->
@@ -1352,17 +1364,16 @@ mkNewtypeDeclaration ngi =
   , TyType $ B.byteString ngi.wrappedType.type_.unHaskellTypeName
   )
 
-generateNewtypeParseFunc :: NewtypeGI -> FunctionBody
-generateNewtypeParseFunc ngi = FunctionBody $ runCodeWriter do
-  out1 (getParserNameForType ngi.typeName <> " arrStart strStart =")
-  withIndent1 do
-   out1 [qc|parseString arrStart strStart|]
+mkListDeclaration :: ListGI -> (TyData, TyCon, TyType)
+mkListDeclaration lgi =
+  ( TyData $ B.byteString lgi.typeName.unHaskellTypeName
+  , TyCon $ B.byteString lgi.consName.unHaskellConsName
+  , TyType $ B.byteString $ mconcat ["[", lgi.itemType.unHaskellTypeName, "]"]
+  )
 
-generateEnumParseFunc :: EnumGI -> FunctionBody
-generateEnumParseFunc en = FunctionBody $ runCodeWriter do
-  out1 (getParserNameForType en.typeName <> " arrStart strStart =")
-  withIndent1 do
-   out1 [qc|parseString arrStart strStart|]
+generateContentTypeParseFunc :: HaskellTypeName -> FunctionBody
+generateContentTypeParseFunc typeName = FunctionBody $ runCodeWriter $
+  out1 (getParserNameForType typeName <> " = parseString")
 
 generateNewtypeExtractFunc :: NewtypeGI -> FunctionBody
 generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
@@ -1383,6 +1394,15 @@ generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
       out1 [qc|"{xmlName}" -> {haskellCon}|]
     out1 [qc|) $ extractStringContent ofs|]
 
+generateListExtractFunc :: ListGI -> FunctionBody
+generateListExtractFunc lgi = FunctionBody $ runCodeWriter do
+  let recType = lgi.typeName
+      consName = lgi.consName
+      baseType = lgi.itemType
+  out1 [qc|extract{recType}Content =|]
+  withIndent1 do
+    out1 [qc|first {consName} . extractAndParse (traverse parse{baseType}Raw . BSC.words)|]
+
 registerGI :: GIType -> CG ()
 registerGI = \case
   GBaseType -> pure ()
@@ -1391,26 +1411,29 @@ registerGI = \case
   GChoice ch -> registerChoiceGI ch
   GEnum en -> registerEnumGI en
   GWrapper nwt -> registerNewtypeGI nwt
+  GList lgi -> registerListGI lgi
+
+registerListGI :: ListGI -> CG ()
+registerListGI lgi = do
+  registerDataDeclaration $ Newtype $ mkListDeclaration lgi
+  registerParseFunction $ generateContentTypeParseFunc lgi.typeName
+  registerExtractionFunction $ generateListExtractFunc lgi
 
 registerEnumGI :: EnumGI -> CG ()
 registerEnumGI e = do
   registerDataDeclaration $ Alg $ mkEnumTypeDeclaration e
+  registerParseFunction $ generateContentTypeParseFunc e.typeName
   registerExtractionFunction $ generateEnumExtractFunc e
-  registerParseFunction $ generateEnumParseFunc e
 
 registerNewtypeGI :: NewtypeGI -> CG ()
 registerNewtypeGI ngi = do
   registerDataDeclaration $ Newtype $ mkNewtypeDeclaration ngi
+  registerParseFunction $ generateContentTypeParseFunc ngi.typeName
   registerExtractionFunction $ generateNewtypeExtractFunc ngi
-  registerParseFunction $ generateNewtypeParseFunc ngi
-
- 
 
 registerNamedType :: XmlNameWN -> Namespace -> TypeWithAttrs -> CG ()
 registerNamedType xmlName namespace haskellType = do
-  -- knownTypes %= Map.insert xmlName haskellType
   knownTypes %= Map.alter (Just . ((namespace, haskellType) :) . fromMaybe []) xmlName
-  -- processedSchemaTypes %= Set.insert xmlName -- TODO: why is it here?
 
 processSchemaNamedType :: QualNamespace -> Namespace -> (XmlNameWN, Type) -> CG TypeWithAttrs
 processSchemaNamedType quals namespace (tName, tDef) = do
@@ -1422,11 +1445,6 @@ processSchemaNamedType quals namespace (tName, tDef) = do
       haskellTypeName <- processType quals (Just tName) tDef
       registerNamedType tName namespace haskellTypeName
       pure haskellTypeName
-
-{-
-processSchemaNamedTypes :: TypeDict -> CG ()
-processSchemaNamedTypes dict = forM_ (Map.toList dict) processSchemaNamedType
--}
 
 generateModuleHeading ::
   HasCallStack =>

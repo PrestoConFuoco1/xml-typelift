@@ -77,6 +77,7 @@ module CodeGenMonad(-- Code generation monad
                    ,ChoiceGI(..)
                    ,EnumGI(..)
                    ,NewtypeGI(..)
+                   ,ListGI(..)
                    ,Repeatedness (..)
                    ,FieldGI (..)
                    ,ContentWithAttrsGI (..)
@@ -179,6 +180,7 @@ data GIType
   | GChoice ChoiceGI
   | GEnum EnumGI
   | GWrapper NewtypeGI
+  | GList ListGI
   deriving stock (Show)
 
 data ContentWithAttrsGI = ContentWithAttrsGI
@@ -228,6 +230,13 @@ data NewtypeGI = NewtypeGI
   }
   deriving stock (Show)
  
+data ListGI = ListGI
+  { typeName :: HaskellTypeName
+  , consName :: HaskellConsName
+  , itemType :: HaskellTypeName
+  }
+  deriving stock (Show)
+
 data Repeatedness = RepMaybe
                   | RepOnce
                   | RepMany
