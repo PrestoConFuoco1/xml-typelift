@@ -172,6 +172,7 @@ data TyPart = Seq    [TyPart]
             | All    [TyPart]
             | Group  XMLString -- named group of elements
             | Elt    Element
+            | Any (Maybe XMLString)
              -- no support for xs:all yet
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 

@@ -1179,7 +1179,7 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       , inTagInfo = Just (eName elt, eltToRepeatedness elt)
       , possibleFirstTag = [eName elt]
       }
-  _ -> error "anything other than Seq or Choice inside Complex is not supported"
+  unexp -> error $ "anything other than Seq or Choice inside Complex is not supported: " <> show unexp
 
 attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [FieldGI]
 attributeToField headTypeName quals attr = case attr of

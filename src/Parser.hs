@@ -113,6 +113,7 @@ instance FromXML TyPart where
       "all"     ->  parseTyPart All    node
       "sequence"     ->  parseTyPart Seq    node
       "element" ->  Elt <$> fromXML    node
+      "any" -> pure $ Any (List.lookup "substitute" $ attributes node)
       other     -> ("Unknown type particle '" <> bshow other <> "'" <> cs (show node)) `failHere` other
 
 -- | Parse type particle, and fix missing attribute values in case of xs:all
