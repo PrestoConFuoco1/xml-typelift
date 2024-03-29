@@ -1406,19 +1406,28 @@ generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
   let typeName = ngi.typeName
       consName = ngi.consName
       wrappedName = ngi.wrappedType.type_
+  out1 [qc|{getParseRawFuncName typeName} =|]
+  withIndent1 do
+    out1 [qc|fmap {consName} . {getParseRawFuncName wrappedName}|]
   out1 [qc|extract{typeName}Content ofs =|]
   withIndent1 do
     out1 [qc|first {consName} $ extract{wrappedName}Content ofs|]
 
+getParseRawFuncName :: HaskellTypeName -> String
+getParseRawFuncName typeName = [qc|parse{typeName}Raw|]
+
 generateEnumExtractFunc :: EnumGI -> FunctionBody
 generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
   let recType = en.typeName
+  out1 [qc|{getParseRawFuncName recType} = \case|]
+  withIndent1 do
+    for_ en.constrs \(xmlName, haskellCon) ->
+      out1 [qc|"{xmlName}" -> pure {haskellCon}|]
+    out1 [qc|unknown -> error $ "unknown enum value: " <> show unknown|]
+
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 do
-    out1 [qc|first (\case|]
-    for_ en.constrs \(xmlName, haskellCon) ->
-      out1 [qc|"{xmlName}" -> {haskellCon}|]
-    out1 [qc|) $ extractStringContent ofs|]
+    out1 [qc|extractAndParse {getParseRawFuncName recType} ofs|]
 
 generateListExtractFunc :: ListGI -> FunctionBody
 generateListExtractFunc lgi = FunctionBody $ runCodeWriter do
