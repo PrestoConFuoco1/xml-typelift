@@ -1057,11 +1057,15 @@ mkFieldName ::
   HaskellFieldName
 mkFieldName opts typeName x =
     HaskellFieldName $
+    (lensesPrefix <>) $
     if isogenNaming
-      then getMainLetters typeName.unHaskellTypeName <> normalizeTypeName x
+      then getMainLetters typeName.unHaskellTypeName <> (hackDropUnderscores $ normalizeTypeName x)
       else x
   where
   UseXmlIsogenNaming isogenNaming = opts.useXmlIsogenNaming
+  ShouldGenLenses genLenses = opts.shouldGenerateLenses
+  lensesPrefix = if genLenses then "_" else ""
+  hackDropUnderscores = BS.dropWhile (== '_')
 
 data ConsNameOption
   = CnoRecord
@@ -1087,7 +1091,7 @@ processAttrGroup ::
   [Attr] ->
   CG TypeWithAttrs
 processAttrGroup nm quals attrs = do
-  attrFields <- concat <$> mapM (attributeToField "" quals) attrs
+  attrFields <- concat <$> mapM (attributeToField' False "" quals) attrs
   let
     q =
       GSeq SequenceGI
@@ -1218,15 +1222,20 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       }
   unexp -> error $ "anything other than Seq or Choice inside Complex is not supported: " <> show unexp
 
-attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [FieldGI]
-attributeToField headTypeName quals attr = case attr of
+attributeToField = attributeToField' True
+
+attributeToField' :: Bool -> HaskellTypeName -> QualNamespace -> Attr -> CG [FieldGI]
+attributeToField' finalFieldName headTypeName quals attr = case attr of
   AttrGrp AttrGroupRef{ref} -> do
     TypeWithAttrs{giType} <- lookupHaskellTypeBySchemaType quals ref
     genOpts <- asks genOpts
     let
       modifyFieldName field =
         field
-          { haskellName = mkFieldName genOpts headTypeName field.haskellName.unHaskellFieldName
+          { haskellName =
+            if True -- finalFieldName
+            then mkFieldName genOpts headTypeName field.haskellName.unHaskellFieldName
+            else HaskellFieldName $ field.haskellName.unHaskellFieldName
           }
     case giType of
       GSeq seq_ | null seq_.fields -> pure $ map modifyFieldName seq_.attributes
