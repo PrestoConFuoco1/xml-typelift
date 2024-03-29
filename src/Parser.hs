@@ -98,7 +98,9 @@ instance FromXML TypeDesc where
   fromXML  node = case nodeName node of
                     "simpleType"  -> fromXML' node
                     "complexType" -> fromXML' node
-                    "attributeGroup" -> fromXML' node
+                    "attributeGroup" -> do
+                      TypeDesc { tName, ty = cpl@Complex {attrs}} <- fromXML' node
+                      pure TypeDesc {tName, ty = AttrGroupType attrs}
                     otherName     -> ("Node expected to contain type descriptor is named '"
                                     <> otherName <> "'") `failHere` otherName
 

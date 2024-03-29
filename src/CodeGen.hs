@@ -475,12 +475,12 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
     generateAuxiliaryFunctions_ = do
         outCodeLine' [qc|extractStringContent :: Int -> (ByteString, Int)|]
         if isUnsafe then
-            outCodeLine' [qc|extractStringContent ofs = (BSU.unsafeTake bslen (BSU.unsafeDrop bsofs bs), ofs + 2)|]
+            outCodeLine' [qc|extractStringContent ofs = (echoN "extractStringContent:result" 15 $ BSU.unsafeTake bslen (BSU.unsafeDrop bsofs bs), ofs + 2)|]
         else
             outCodeLine' [qc|extractStringContent ofs = (BS.take bslen (BS.drop bsofs bs), ofs + 2)|]
         outCodeLine' [qc|  where|]
-        outCodeLine' [qc|    bsofs = arr {index} ofs|]
-        outCodeLine' [qc|    bslen = arr {index} (ofs + 1)|]
+        outCodeLine' [qc|    bsofs = echo "extractStringContent:offset" $ arr {index} ofs|]
+        outCodeLine' [qc|    bslen = echo "extractStringContent:length" $ arr {index} (ofs + 1)|]
         outCodeLine' [qc|extractMaybe ofs subextr|]
         outCodeLine' [qc|  | arr {index} ofs == 0 = (Nothing, ofs + 1)|]
         outCodeLine' [qc|  | otherwise                     = first Just $ subextr (ofs + 1)|]
@@ -583,6 +583,11 @@ generateAuxiliaryFunctions = do
     outCodeLine' "{-# INLINE fromRight' #-}"
     outCodeLine' ""
     outCodeLine' ""
+    outCodeLine' [qc|echo :: Show a => String -> a -> a|]
+    outCodeLine' [qc|echo msg x = (msg <> ": " <> show x) `trace` x|]
+    outCodeLine' ""
+    outCodeLine' [qc|echoN :: Show a => String -> Int -> a -> a|]
+    outCodeLine' [qc|echoN msg n x = (msg <> ": " <> take n (show x)) `trace` x|]
 
 generateParserTop :: CG ()
 generateParserTop = do
@@ -626,8 +631,6 @@ generateMainFunction GenerateOpts{..} = trace "main" do
             outCodeLine' [qc|(_,  filenames) -> parseAndPrintFiles True  filenames|]
         outCodeLine' "exitSuccess"
     outCodeLine' ""
-    outCodeLine' [qc|echo :: Show a => String -> a -> a|]
-    outCodeLine' [qc|echo msg x = (msg <> ": "<> show x) `trace` x |]
 
 getSequenceAttrs :: SequenceGI -> AttributesInfo
 getSequenceAttrs s = case NE.nonEmpty $ map (fromJust . (.xmlName)) s.attributes of
@@ -642,8 +645,8 @@ getExtContentAttrs c = case NE.nonEmpty $ map (fromJust . (.xmlName)) c.attribut
 mkChoiceTypeDeclaration :: ChoiceGI -> SumType
 mkChoiceTypeDeclaration ch =
   ( TyData $ B.byteString ch.typeName.unHaskellTypeName
-  , flip map ch.alts \(_inTagInfo, _possibleTags, cons_, conType) -> do
-    (TyCon $ B.byteString cons_.unHaskellConsName, TyType $ B.byteString conType.type_.unHaskellTypeName)
+  , flip map ch.alts \(inTagInfo, _possibleTags, cons_, conType) -> do
+    (TyCon $ B.byteString cons_.unHaskellConsName, TyType $ mkTypeWithCardinality inTagInfo $ B.byteString conType.type_.unHaskellTypeName)
   )
 
 mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
@@ -681,15 +684,21 @@ newtype IsAttr = IsAttr Bool
 mkFieldDeclaration :: (FieldGI, IsAttr) -> TyField
 mkFieldDeclaration (fld, IsAttr isAttr) =
   ( TyFieldName $ B.byteString fld.haskellName.unHaskellFieldName
-  , TyType $ mkCardinality $ B.byteString fld.typeName.type_.unHaskellTypeName
+  , TyType $ mkFieldType $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
   where
-    mkCardinality x = case fld.inTagInfo of
-      Nothing -> if isAttr then "Maybe " <> x else x
-      Just (_, card) -> case card of
-        RepMaybe -> "Maybe " <> x
-        RepOnce -> x
-        _ -> "[" <> x <> "]"
+  mkFieldType x =
+    if isAttr
+    then "Maybe " <> x
+    else mkTypeWithCardinality fld.inTagInfo x
+
+mkTypeWithCardinality :: Maybe (a1, Repeatedness) -> B.Builder -> B.Builder
+mkTypeWithCardinality inTagInfo x = case inTagInfo of
+  Nothing -> x
+  Just (_, card) -> case card of
+    RepMaybe -> "Maybe " <> x
+    RepOnce -> x
+    _ -> "[" <> x <> "]"
 
 {-
 exampleSequenceGI :: SequenceGI
@@ -823,9 +832,11 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
     let vecIndex = "`V.unsafeIndex`" :: String
     out1 [qc|let altIdx = arr {vecIndex} ofs|]
     out1 [qc|case altIdx of|]
-    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((_inTagInfo, _possibleFirstTags, cons_, type_), altIdx) -> do
+    withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((inTagInfo, _possibleFirstTags, cons_, type_), altIdx) -> do
       let typeName = type_.type_
-      out1 [qc|{altIdx} -> first {cons_} $ extract{typeName}Content (ofs + 1)|]
+      -- out1 [qc|{altIdx} -> first {cons_} $ extract{typeName}Content (ofs + 1)|]
+      let extractor = getExtractorNameWithQuant "(ofs + 1)" inTagInfo typeName
+      out1 [qc|{altIdx} -> first {cons_} $ {extractor}|]
 
 generateAttrContentExtract :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
@@ -859,7 +870,7 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
                   fieldName = fld.haskellName
-                  extractor = getExtractorNameWithQuant ofs fld
+                  extractor = getExtractorNameWithQuant ofs fld.inTagInfo fld.typeName.type_
               out1 [qc|let ({fieldName}, ofs{ofsIdx}) = {extractor} in|]
               return fieldName
       let fields = attrFields ++ properFields
@@ -870,19 +881,17 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
           [oneField] -> out1 [qc|({haskellConsName} {oneField}, {ofs'})|]
           _          -> out1 [qc|({haskellConsName}\{..}, {ofs'})|]
 
-  where
-    getExtractorNameWithQuant :: XMLString -> FieldGI -> XMLString -- ? Builder
-    getExtractorNameWithQuant ofs fld = do
-        let (fieldQuantifier::(Maybe XMLString)) = case fld.inTagInfo of
-              Nothing -> Nothing
-              Just (_, card) -> case card of
-                RepMaybe -> Just "extractMaybe"
-                RepOnce  -> Nothing
-                _        -> Just "extractMany" -- TODO add extractExact support
-            fieldTypeName = fld.typeName.type_
-        case fieldQuantifier of
-                 Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
-                 Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
+getExtractorNameWithQuant :: XMLString -> Maybe (XMLString, Repeatedness) -> HaskellTypeName -> XMLString -- ? Builder
+getExtractorNameWithQuant ofs inTagInfo fieldTypeName = do
+    let (fieldQuantifier::(Maybe XMLString)) = case inTagInfo of
+          Nothing -> Nothing
+          Just (_, card) -> case card of
+            RepMaybe -> Just "extractMaybe"
+            RepOnce  -> Nothing
+            _        -> Just "extractMany" -- TODO add extractExact support
+    case fieldQuantifier of
+             Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
+             Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
 
 lookupSchemaType :: QualNamespace -> XMLString -> CG (Namespace, (Type, QualNamespace))
 lookupSchemaType quals xmlType = do
@@ -1061,10 +1070,11 @@ getUniqueConsName cno s = do
 
 -- TODO: process attribute groups in more natural way
 processAttrGroup ::
+  Maybe XmlNameWN ->
   QualNamespace ->
   [Attr] ->
-  CG TyPartInfo
-processAttrGroup quals attrs = do
+  CG TypeWithAttrs
+processAttrGroup nm quals attrs = do
   attrFields <- concat <$> mapM (attributeToField "" quals) attrs
   let
     q =
@@ -1074,11 +1084,12 @@ processAttrGroup quals attrs = do
         , attributes = attrFields
         , fields = []
         }
-  pure TyPartInfo
-    { partType = TypeWithAttrs (error "partType should not be used") q
-    , inTagInfo = error "inTagInfo should not be used"
-    , possibleFirstTag = error "possibleFirstTag should not be used"
-    }
+  pure $
+    -- TyPartInfo
+    TypeWithAttrs (error $ "partType should not be used; attrs: " <> show attrs <> "; name=" <> show nm) q
+    -- , inTagInfo = error "inTagInfo should not be used"
+    -- , possibleFirstTag = error "possibleFirstTag should not be used"
+    -- }
 
 processSeq ::
   Maybe XmlNameWN ->
@@ -1184,7 +1195,6 @@ processTyPart ::
   TyPart ->
   CG TyPartInfo
 processTyPart possibleName quals _mixed attrs inner = case inner of
-  Seq [] -> processAttrGroup quals attrs
   Seq seqParts -> processSeq possibleName quals attrs seqParts
   Choice choiceAlts -> processChoice possibleName quals choiceAlts
   Elt elt -> do
@@ -1233,6 +1243,7 @@ processType quals mbPossibleName = \case
     lookupHaskellTypeBySchemaType quals knownType
   Complex{mixed, attrs, inner} ->
     partType <$> processTyPart mbPossibleName quals mixed attrs inner
+  AttrGroupType attrs -> processAttrGroup mbPossibleName quals attrs
   Restriction{base, restricted} -> case restricted of
     Enum alts -> do
       let possibleName = fromMaybe (error "anonymous enums are not supported") mbPossibleName

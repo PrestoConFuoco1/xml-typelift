@@ -137,6 +137,7 @@ data Type =
       , attrs :: ![Attr]
       , inner :: !TyPart
       }
+  | AttrGroupType { attrs :: ![Attr] }
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 instance Default Type where
