@@ -33,7 +33,8 @@ basePrologue :: Bool -> String
 basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines baseTypes
   where
     makeImport modPath = "import " <> modPath <> "\n"
-    modules = ["Data.Time.LocalTime(ZonedTime, TimeOfDay)"
+    modules = ["Data.Maybe"
+              ,"Data.Time.LocalTime(ZonedTime, TimeOfDay)"
               ,"Data.Time.Format.ISO8601(iso8601ParseM)"
               ,"Data.Int(Int64)"
               ,if isUnsafe then "Data.Scientific (Scientific)" else "Data.Scientific.Safe (Scientific)"

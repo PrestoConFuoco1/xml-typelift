@@ -215,6 +215,7 @@ data FieldGI = FieldGI
   , xmlName :: Maybe XMLString
   , typeName :: TypeWithAttrs
   , inTagInfo :: Maybe (XMLString, Repeatedness)
+  , attrUse :: Maybe Use
   }
   deriving stock (Show)
 

@@ -678,9 +678,8 @@ mkAttrContentTypeDeclaration cgi =
       , xmlName = Nothing
       , typeName = typeNoAttrs cgi.contentType GBaseType
       , inTagInfo = Nothing
+      , attrUse = Nothing
       }
-
-
 
 newtype IsAttr = IsAttr Bool
 
@@ -690,9 +689,12 @@ mkFieldDeclaration (fld, IsAttr isAttr) =
   , TyType $ mkFieldType $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
   where
+  attrRequired = case fld.attrUse of
+    Just Required -> True
+    _ -> False
   mkFieldType x =
     if isAttr
-    then "Maybe " <> x
+    then (if attrRequired then x else "Maybe " <> x)
     else mkTypeWithCardinality fld.inTagInfo x
 
 mkTypeWithCardinality :: Maybe (a1, Repeatedness) -> B.Builder -> B.Builder
@@ -853,7 +855,17 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
         let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
         let haskellAttrName = attr.haskellName.unHaskellFieldName
         let haskellTypeName = attr.typeName.type_
-        out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+        let
+          attrRequired = case attr.attrUse of
+            Just Required -> True
+            _ -> False
+        let
+          requiredModifier =
+            if attrRequired
+            then [qc|first (fromMaybe $ error $ "attribute {haskellAttrName} in type {recType} is required but it's absent") $ |]
+            else "" :: String
+
+        out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
     let contentField = cgi.contentFieldName
     out1 [qc|let ({contentField}, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
@@ -868,7 +880,16 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
           let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
           let haskellAttrName = attr.haskellName
           let haskellTypeName = attr.typeName.type_
-          out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+          let
+            attrRequired = case attr.attrUse of
+              Just Required -> True
+              _ -> False
+          let
+            requiredModifier =
+              if attrRequired
+              then [qc|first (fromMaybe $ error $ "attribute {haskellAttrName} in type {recType} is required but it's absent") $ |]
+              else "" :: String
+          out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
           return haskellAttrName
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
@@ -1159,6 +1180,7 @@ processSeq mbPossibleName quals attrs seqParts = do
       , xmlName = Nothing
       , typeName = tyPart.partType
       , inTagInfo = tyPart.inTagInfo
+      , attrUse = Nothing
       }
 
 processChoice ::
@@ -1242,7 +1264,7 @@ attributeToField' finalFieldName headTypeName quals attr = case attr of
     case giType of
       GSeq seq_ | null seq_.fields -> pure $ map modifyFieldName seq_.attributes
       _ -> error "expected attribute group"
-  Attr{aType} -> do
+  Attr{aType, use = echo "use" -> use_} -> do
     typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) aType
     genOpts <- asks genOpts
     pure $ List.singleton FieldGI
@@ -1252,13 +1274,8 @@ attributeToField' finalFieldName headTypeName quals attr = case attr of
       --, cardinality = RepMaybe
       , typeName
       , inTagInfo = Nothing
+      , attrUse = Just use_
       }
-
-eltNameToHaskellFieldName :: BS.ByteString -> HaskellFieldName
-eltNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
-
-attrNameToHaskellFieldName :: XMLString -> HaskellFieldName
-attrNameToHaskellFieldName = HaskellFieldName . normalizeFieldName
 
 processType :: QualNamespace -> Maybe XmlNameWN -> Type -> CG TypeWithAttrs
 processType quals mbPossibleName = \case
