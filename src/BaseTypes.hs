@@ -29,8 +29,8 @@ import           FromXML
 import           Schema
 
 -- | Module prologue to import all standard types
-basePrologue :: (IsString a, Semigroup a, Monoid a) => Bool -> a
-basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> mconcat baseTypes
+basePrologue :: Bool -> String
+basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines baseTypes
   where
     makeImport modPath = "import " <> modPath <> "\n"
     modules = ["Data.Time.LocalTime(ZonedTime, TimeOfDay)"
@@ -48,6 +48,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> mconcat base
               ,"Control.DeepSeq"
               ,"Control.Monad.Fix"
               ,"Control.Monad.ST"
+              ,"Control.Lens.TH"
               ,"qualified Data.STRef as STRef"
               ,"Data.ByteString (ByteString)"
               ,"Debug.Trace"
@@ -88,7 +89,13 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> mconcat base
     prettyPrintModules
       | isUnsafe  = ["Text.Pretty.Simple"]
       | otherwise = []
-    baseTypes = ["type XMLString = ByteString"]
+    baseTypes =
+      ["type XMLString = ByteString"
+      ,"type GYearMonth = Month"
+      ,"type GYear = Year"
+      ,"type GMonth = MonthOfYear"
+      ]
+
 
 baseTranslations :: [(BS.ByteString, BS.ByteString)]
 baseTranslations =

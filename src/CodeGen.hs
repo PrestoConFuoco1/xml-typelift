@@ -60,9 +60,6 @@ import Data.Char (isDigit, isUpper, toLower)
 --import           Text.Pretty.Simple
 --import           Identifiers
 
-instance ShowQ B.Builder where
-  showQ = TL.unpack . TLE.decodeUtf8 . B.toLazyByteString
-
 codegen' :: GenerateOpts -> Schema -> CG () -> IO String
 codegen' opts sch gen = do
     let output = runCodeGen opts sch gen
@@ -141,10 +138,15 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
     topNameProcessed <- processType quals (Just $ mkXmlNameWN $ eName theSelectedTop) (eType theSelectedTop)
     declaredTypes <- Lens.use typeDecls
     forM_ declaredTypes \case
-      Alg rec -> declareAlgebraicType rec
+      Alg rec -> declareAlgebraicType opts rec
       Newtype (t, c, wt) -> declareNewtype t c wt
       Sumtype sumtype -> declareSumType sumtype
+    forM_ declaredTypes \case
+      Alg (TyData tyDataRaw, _) -> outCodeLine [qc|makeLenses ''{tyDataRaw}|]
+      Newtype (TyData tyDataRaw, _, _) -> outCodeLine [qc|makePrisms ''{tyDataRaw}|]
+      Sumtype (TyData tyDataRaw, _) -> outCodeLine [qc|makePrisms ''{tyDataRaw}|]
     when genParser do
+      outCodeLine [qc||]
       outCodeLine [qc|type TopLevel = {type_ topNameProcessed}|]
       outCodeLine [qc|-- PARSER --|]
       generateParserInternalStructures
@@ -459,10 +461,6 @@ generateParserExtractTopLevel1 ::
   CG ()
 generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
     let topTypeName = topType.type_
-    outCodeLine' [qc|type GYearMonth = Month|]
-    outCodeLine' [qc|type GYear = Year|]
-    outCodeLine' [qc|type GMonth = MonthOfYear|]
-    outCodeLine' [qc||]
     outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
     outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
     withIndent $ do
@@ -583,11 +581,16 @@ generateAuxiliaryFunctions = do
     outCodeLine' "{-# INLINE fromRight' #-}"
     outCodeLine' ""
     outCodeLine' ""
+
+    outCodeLine' [qc|echo = \_ -> id|]
+    outCodeLine' [qc|echoN = \_ _ -> id|]
+{-
     outCodeLine' [qc|echo :: Show a => String -> a -> a|]
     outCodeLine' [qc|echo msg x = (msg <> ": " <> show x) `trace` x|]
     outCodeLine' ""
     outCodeLine' [qc|echoN :: Show a => String -> Int -> a -> a|]
     outCodeLine' [qc|echoN msg n x = (msg <> ": " <> take n (show x)) `trace` x|]
+-}
 
 generateParserTop :: CG ()
 generateParserTop = do
@@ -959,7 +962,6 @@ lookupHaskellTypeBySchemaType quals xmlType =
 
 registerDataDeclaration :: TypeDecl -> CG ()
 registerDataDeclaration decl = typeDecls %= (decl :)
-
 
 registerExtractionFunction :: FunctionBody -> CG ()
 registerExtractionFunction fBody = extractFunctions %= (fBody :)

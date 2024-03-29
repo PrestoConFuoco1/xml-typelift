@@ -1,3 +1,5 @@
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 -- | Generating type declarations in code generation monad.
 {-# LANGUAGE CPP               #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -19,6 +21,7 @@ import qualified Data.ByteString.Builder    as B
 import           Language.Haskell.TH.Syntax as TH hiding (SumAlt)
 import TypeDecls1
 import           CodeGenMonad
+import           Text.InterpolatedString.Perl6     (qc, ShowQ (..))
 
 
 
@@ -61,14 +64,13 @@ makeCommonDerivingClause = do
 #endif
 
 
-declareAlgebraicType :: (TyData, [Record]) -> CG ()
-declareAlgebraicType    (_,          []) = error "Empty list of records"
-declareAlgebraicType    (tyDataName,   records) =
+declareAlgebraicType :: GenerateOpts -> (TyData, [Record]) -> CG ()
+declareAlgebraicType  _ (_,          []) = error "Empty list of records"
+declareAlgebraicType  _ (tyDataName@(TyData tyDataRaw),   records) = do
     out $ do dataName <- newDataName tyDataName
              recs     <- mapM formatRecord records
              derivClauses   <- makeCommonDerivingClause
              return $ DataD [] dataName [] Nothing recs derivClauses
-
 
 formatRecord :: Record -> Q Con
 formatRecord (name, fields) = do
@@ -96,12 +98,11 @@ declareSumType (tyDataName, sumTypes) =
 
 
 declareNewtype :: TyData -> TyCon -> TyType -> CG ()
-declareNewtype tyDataName tyConstr baseTy =
+declareNewtype tyDataName@(TyData tyDataRaw) tyConstr baseTy = do
     out $ do dataName <- newDataName tyDataName
              constr   <- mkNormalC tyConstr baseTy
              derivClauses   <- makeCommonDerivingClause
              return $ NewtypeD [] dataName [] Nothing constr derivClauses
-
 
 mkNormalC :: TyCon -> TyType -> Q TH.Con
 mkNormalC tyConstr tyName@(TyType bsn) = do

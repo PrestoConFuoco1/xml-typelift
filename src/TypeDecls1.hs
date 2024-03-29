@@ -7,7 +7,12 @@ module TypeDecls1 where
 import           Control.Monad
 import qualified Data.ByteString.Builder    as B
 import           Language.Haskell.TH.Syntax as TH hiding (SumAlt)
+import Text.InterpolatedString.Perl6
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TLE
 
+instance ShowQ B.Builder where
+  showQ = TL.unpack . TLE.decodeUtf8 . B.toLazyByteString
 
 -- TODO: type alias these for safety
 -- * Type declarations
@@ -35,5 +40,3 @@ data TypeDecl
   = Alg (TyData, [Record])
   | Newtype (TyData, TyCon, TyType)
   | Sumtype SumType
-
-
