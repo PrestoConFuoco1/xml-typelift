@@ -27,6 +27,7 @@ module CodeGenMonad(-- Code generation monad
                    ,CGOutputEntity(..)
                    ,Env (..)
                    ,UseXmlIsogenNaming (..)
+                   ,ShouldGenLenses (..)
                    ,GenerateOpts (..)
                    ,runCodeGen
                    ,out
@@ -294,19 +295,23 @@ instance RWS.MonadWriter CGOutput CG where
 newtype UseXmlIsogenNaming = UseXmlIsogenNaming Bool
   deriving Show
 
+newtype ShouldGenLenses = ShouldGenLenses Bool
+  deriving Show
+
 -- | Options for generating
 data GenerateOpts = GenerateOpts
     { isGenerateMainFunction :: Bool
     , isUnsafe               :: Bool
     , topName :: Maybe String
     , useXmlIsogenNaming :: UseXmlIsogenNaming
+    , shouldGenerateLenses :: ShouldGenLenses
     } deriving Show
 
 instance Default GenerateOpts where
-    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False)
+    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False) (ShouldGenLenses False)
 
 data Env = Env
-  { isogenNaming :: UseXmlIsogenNaming
+  { genOpts :: GenerateOpts
   , schema :: Schema
   }
 
@@ -361,8 +366,8 @@ builderUnlines []     = ""
 builderUnlines (l:ls) = l <> mconcat (("\n" <>) <$> ls)
 
 -- | Make builder to generate schema code.
-runCodeGen :: UseXmlIsogenNaming -> Schema -> CG () -> CGOutput
-runCodeGen isogenNaming sch (CG rws) = case RWS.runRWS rws (Env isogenNaming sch) initialState of
+runCodeGen :: GenerateOpts -> Schema -> CG () -> CGOutput
+runCodeGen opts sch (CG rws) = case RWS.runRWS rws (Env opts sch) initialState of
                             ((), _state, output) -> output
 
 -- | Convert builder back to String, if you need to examine the content.

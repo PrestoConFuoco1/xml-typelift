@@ -15,7 +15,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE BlockArguments #-}
 -- | Here we aim to analyze the schema.
-module CodeGen(GenerateOpts(..), parserCodegen, codegen, UseXmlIsogenNaming (..)) where
+module CodeGen(GenerateOpts(..), parserCodegen, codegen, UseXmlIsogenNaming (..), ShouldGenLenses (..)) where
 
 import           Prelude                           hiding (id, lookup)
 
@@ -63,9 +63,9 @@ import Data.Char (isDigit, isUpper, toLower)
 instance ShowQ B.Builder where
   showQ = TL.unpack . TLE.decodeUtf8 . B.toLazyByteString
 
-codegen' :: UseXmlIsogenNaming -> Schema -> CG () -> IO String
-codegen' isogenNaming sch gen = do
-    let output = runCodeGen isogenNaming sch gen
+codegen' :: GenerateOpts -> Schema -> CG () -> IO String
+codegen' opts sch gen = do
+    let output = runCodeGen opts sch gen
     codeLines <- mapM outputToString output
     return $ unlines codeLines
   where
@@ -85,7 +85,7 @@ parserCodegen opts sch = do
     --putStrLn "~~~~~~ Schema tops: ~~~~~~~~~"
     --pPrint (tops sch)
     --putStrLn "~~~~~~~~~~~~~~~~~~~~~~~~"
-    codegen' opts.useXmlIsogenNaming sch $ do
+    codegen' opts sch $ do
       -- generateParser1 opts sch
       generateParser2 True opts sch
       pure ()
@@ -122,7 +122,7 @@ withIndent act = do -- TODO use `bracket`
 
 codegen :: GenerateOpts -> Schema -> IO String
 codegen c sch =
-  codegen' c.useXmlIsogenNaming sch $ generateParser2 False c sch
+  codegen' c sch $ generateParser2 False c sch
 
 generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
 generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} schema = do
@@ -1003,11 +1003,13 @@ getUniqueName mk possibleName getSet = do
     map mk $
       possibleName : map ((possibleName <>) . cs . show) [1..100::Int]
 
-append'Xml' :: UseXmlIsogenNaming -> XMLString -> XMLString
-append'Xml' (UseXmlIsogenNaming isogenNaming) x =
+append'Xml' :: GenerateOpts -> XMLString -> XMLString
+append'Xml' opts x =
       if isogenNaming
       then "Xml" <> normalizeTypeName x
       else x
+  where
+  UseXmlIsogenNaming isogenNaming = opts.useXmlIsogenNaming
 
 {-
 wordChar :: Word8 -> Char
@@ -1020,36 +1022,46 @@ charWord = fromIntegral . ord
 getMainLetters :: XMLString -> XMLString
 getMainLetters = BS.map toLower . BS.filter (\c -> isDigit c || isUpper c)
 
-appendMainLetters :: UseXmlIsogenNaming -> HaskellTypeName -> XMLString -> XMLString
-appendMainLetters (UseXmlIsogenNaming isogenNaming) typeName x =
+appendMainLetters :: GenerateOpts -> HaskellTypeName -> XMLString -> XMLString
+appendMainLetters opts typeName x =
   if isogenNaming
   then do
     getMainLetters typeName.unHaskellTypeName <> norm
   else typeName.unHaskellTypeName <> norm
-  where norm = normalizeTypeName x
+  where
+  norm = normalizeTypeName x
+  UseXmlIsogenNaming isogenNaming = opts.useXmlIsogenNaming
 
-appendTypeName :: UseXmlIsogenNaming -> HaskellTypeName -> XMLString -> XMLString
-appendTypeName (UseXmlIsogenNaming isogenNaming) typeName x =
+appendTypeName :: GenerateOpts -> HaskellTypeName -> XMLString -> XMLString
+appendTypeName opts typeName x =
   if isogenNaming
   then typeName.unHaskellTypeName <> normalizeTypeName x
   else x
+  where
+  UseXmlIsogenNaming isogenNaming = opts.useXmlIsogenNaming
 
 getUniqueTypeName :: XMLString -> CG HaskellTypeName
 getUniqueTypeName raw = do
-  isogenNaming <- asks isogenNaming
+  genOpts <- asks genOpts
   let
     getRaw' =
-      mkHaskellTypeName . append'Xml' isogenNaming
+      mkHaskellTypeName . append'Xml' genOpts
   res <- getUniqueName getRaw' raw getAllocatedHaskellTypes
   allocatedHaskellTypes %= Set.insert res
   pure res
 
-mkFieldName :: UseXmlIsogenNaming -> HaskellTypeName -> XMLString -> HaskellFieldName
-mkFieldName (UseXmlIsogenNaming isogenNaming) typeName x =
+mkFieldName ::
+  GenerateOpts ->
+  HaskellTypeName ->
+  XMLString ->
+  HaskellFieldName
+mkFieldName opts typeName x =
     HaskellFieldName $
     if isogenNaming
       then getMainLetters typeName.unHaskellTypeName <> normalizeTypeName x
       else x
+  where
+  UseXmlIsogenNaming isogenNaming = opts.useXmlIsogenNaming
 
 data ConsNameOption
   = CnoRecord
@@ -1058,12 +1070,12 @@ data ConsNameOption
 
 getUniqueConsName :: ConsNameOption -> XMLString -> CG HaskellConsName
 getUniqueConsName cno s = do
-  isogenNaming <- asks isogenNaming
+  genOpts <- asks genOpts
   let
     modifierFunc = mkHaskellConsName . case cno of
-      CnoRecord -> append'Xml' isogenNaming
-      CnoSum typeName -> appendMainLetters isogenNaming typeName
-      CnoEnum typeName -> appendTypeName isogenNaming typeName
+      CnoRecord -> append'Xml' genOpts
+      CnoSum typeName -> appendMainLetters genOpts typeName
+      CnoEnum typeName -> appendTypeName genOpts typeName
   res <- getUniqueName modifierFunc s getAllocatedHaskellConstructors
   allocatedHaskellConses %= Set.insert res
   pure res
@@ -1133,11 +1145,11 @@ processSeq mbPossibleName quals attrs seqParts = do
       }
   elementToField :: HaskellTypeName -> TyPartInfo -> CG FieldGI
   elementToField headTypeName tyPart = do
-    isogenNaming <- asks isogenNaming
+    genOpts <- asks genOpts
     pure FieldGI
       { haskellName = case tyPart.inTagInfo of
-        Nothing -> mkFieldName isogenNaming headTypeName tyPart.partType.type_.unHaskellTypeName
-        Just (tagName, _) -> mkFieldName isogenNaming headTypeName tagName
+        Nothing -> mkFieldName genOpts headTypeName tyPart.partType.type_.unHaskellTypeName
+        Just (tagName, _) -> mkFieldName genOpts headTypeName tagName
       , xmlName = Nothing
       , typeName = tyPart.partType
       , inTagInfo = tyPart.inTagInfo
@@ -1210,21 +1222,21 @@ attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [FieldGI]
 attributeToField headTypeName quals attr = case attr of
   AttrGrp AttrGroupRef{ref} -> do
     TypeWithAttrs{giType} <- lookupHaskellTypeBySchemaType quals ref
-    isogenNaming <- asks isogenNaming
+    genOpts <- asks genOpts
     let
       modifyFieldName field =
         field
-          { haskellName = mkFieldName isogenNaming headTypeName field.haskellName.unHaskellFieldName
+          { haskellName = mkFieldName genOpts headTypeName field.haskellName.unHaskellFieldName
           }
     case giType of
       GSeq seq_ | null seq_.fields -> pure $ map modifyFieldName seq_.attributes
       _ -> error "expected attribute group"
   Attr{aType} -> do
     typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) aType
-    isogenNaming <- asks isogenNaming
+    genOpts <- asks genOpts
     pure $ List.singleton FieldGI
       -- { haskellName = attrNameToHaskellFieldName $ aName attr
-      { haskellName = mkFieldName isogenNaming headTypeName $ aName attr
+      { haskellName = mkFieldName genOpts headTypeName $ aName attr
       , xmlName = Just $ aName attr
       --, cardinality = RepMaybe
       , typeName
@@ -1349,7 +1361,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     NE.NonEmpty Attr ->
     CG (HaskellTypeName, ContentWithAttrsGI)
   addAttrsToSimple attrs = do
-    isogenNaming <- asks isogenNaming
+    genOpts <- asks genOpts
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
     consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
     attrFields <- concat <$> mapM (attributeToField typeName quals) attrs
@@ -1360,7 +1372,7 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
       , consName
       , attributes = attrFields
       , contentType = baseType
-      , contentFieldName = mkFieldName isogenNaming typeName "content"
+      , contentFieldName = mkFieldName genOpts typeName "content"
       })
 
   mbAttrsExtension :: Maybe (NE.NonEmpty Attr)

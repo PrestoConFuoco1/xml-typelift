@@ -122,7 +122,7 @@ execParser' = fmap postProcessOpts . execParser
   where
     postProcessOpts opts@Opts{..}
       | isGenerateTypesOnly && isJust testXmlFilename
-      = error "`--types` don't compatable with `--test-document`"
+      = error "`--types` is not compatible with `--test-document`"
       | textXmlIsPrint && isNothing testXmlFilename
       = error "Specify test XML document for parse and print"
       | isJust testXmlFilename
@@ -150,7 +150,8 @@ optsParser =
                  <$> switch     (long "main"                                 <> help "Generate `main` function")
                  <*> switch     (long "unsafe"                               <> help "Generate fast UNSAFE code")
                  <*> optional (strOption (long "toplevel" <> metavar "TOPLEVEL" <> help "The toplevel type required to be generated"))
-                 <*> (UseXmlIsogenNaming <$> switch (long "isogen-naming" <> help "Use xml-isogen like naming conventions")))
+                 <*> (UseXmlIsogenNaming <$> switch (long "isogen-naming" <> help "Use xml-isogen like naming conventions"))
+                 <*> (ShouldGenLenses <$> switch     (long "generate-lenses"                               <> help "Generate lenses")))
              <*> (optional $
                  filenameOption (long "test-document" <> metavar "FILENAME"  <> help "Path to test document (.xml file) (turn on `--main` and turn off `--types`)"))
              <*> (switch        (long "print-result"                         <> help "Print result of test document parsing"))
