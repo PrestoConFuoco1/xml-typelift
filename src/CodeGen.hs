@@ -671,10 +671,11 @@ mkAttrContentTypeDeclaration :: ContentWithAttrsGI -> (TyData, [Record])
 mkAttrContentTypeDeclaration cgi =
   ( TyData $ B.byteString cgi.typeName.unHaskellTypeName
   , [ ( TyCon $ B.byteString cgi.consName.unHaskellConsName
-      , map mkAttrFieldDeclaration cgi.attributes <> map mkFieldDeclaration [contentField]
+      , map mkAttrFieldDeclaration cgi.attributes <> map mkFieldDeclaration [cgi.content]
       )
     ]
   )
+  {-
   where
   contentField :: FieldGI
   contentField =
@@ -684,6 +685,7 @@ mkAttrContentTypeDeclaration cgi =
       , typeName = typeNoAttrs cgi.contentType GBaseType
       , inTagInfo = Nothing
       }
+-}
 
 mkFieldDeclaration :: FieldGI -> TyField
 mkFieldDeclaration fld =
@@ -750,7 +752,7 @@ generateAttrContentParse :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentParse cgi = FunctionBody $ runCodeWriter do
   generateAttrsAllocation
     TypeWithAttrs {type_ = cgi.typeName, giType = GAttrContent cgi}
-  out1 (getParserNameForType cgi.typeName <> " = " <> getParserNameForType cgi.contentType)
+  out1 (getParserNameForType cgi.typeName <> " = " <> getParserNameForType cgi.content.typeName.type_)
 
 generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
@@ -852,7 +854,8 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
 generateAttrContentExtract :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
   let recType = cgi.typeName
-  let baseType = cgi.contentType
+  let baseType = cgi.content.typeName.type_
+  let contentField = cgi.content.haskellName
   let attrNum = length cgi.attributes
   let consName = cgi.consName
   out1 [qc|extract{recType}Content ofs =|]
@@ -872,7 +875,6 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
             else "" :: String
 
         out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
-    let contentField = cgi.contentFieldName
     out1 [qc|let ({contentField}, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
 
@@ -996,18 +998,25 @@ registerParseFunction fBody = parseFunctions %= (fBody :)
 
 registerSequenceGI :: SequenceGI -> CG ()
 registerSequenceGI s = do
-  attrsFin <- do
-    newAttrs <- forM s.attributes (getAttrFieldName s.typeName)
-    pure $ s & #attributes .~ newAttrs
+  newAttrs <- forM s.attributes (getAttrFieldName s.typeName)
+  newFields <- forM s.fields (finalizeFieldName s.typeName)
+  let
+    attrsFin = s
+      & #attributes .~ newAttrs
+      & #fields .~ newFields
   registerDataDeclaration $ Alg $ mkSequenceTypeDeclaration attrsFin
   registerParseFunction $ generateSequenceParseFunctionBody attrsFin
   registerExtractionFunction $ generateSequenceExtractFunctionBody attrsFin
 
 registerAttrContent :: ContentWithAttrsGI -> CG ()
 registerAttrContent cgi = do
-  attrsFin <- do
-    newAttrs <- forM cgi.attributes (getAttrFieldName cgi.typeName)
-    pure $ cgi & #attributes .~ newAttrs
+  newAttrs <- forM cgi.attributes (getAttrFieldName cgi.typeName)
+  newContent <- finalizeFieldName cgi.typeName cgi.content
+  let
+    attrsFin =
+      cgi
+        & #attributes .~ newAttrs
+        & #content .~ newContent
   registerDataDeclaration $ Alg $ mkAttrContentTypeDeclaration attrsFin
   registerParseFunction $ generateAttrContentParse attrsFin
   registerExtractionFunction $ generateAttrContentExtract attrsFin
@@ -1173,20 +1182,19 @@ processSeq mbPossibleName quals attrs seqParts = do
     typeName <- getUniqueTypeName possibleName
     consName <- getUniqueConsName CnoRecord possibleName
     attrFields <- concat <$> mapM (attributeToField typeName quals) attrs
-    fields <- mapM (elementToField typeName) tyParts
+    fields <- mapM elementToField tyParts
     pure SequenceGI
       { typeName
       , consName
       , attributes = attrFields
       , fields
       }
-  elementToField :: HaskellTypeName -> TyPartInfo -> CG FieldGI
-  elementToField headTypeName tyPart = do
-    genOpts <- asks genOpts
+  elementToField :: TyPartInfo -> CG FieldGI
+  elementToField tyPart = do
     pure FieldGI
       { haskellName = case tyPart.inTagInfo of
-        Nothing -> mkFieldName genOpts headTypeName tyPart.partType.type_.unHaskellTypeName
-        Just (tagName, _) -> mkFieldName genOpts headTypeName tagName
+        Nothing -> HaskellFieldName tyPart.partType.type_.unHaskellTypeName
+        Just (tagName, _) -> HaskellFieldName tagName
       , typeName = tyPart.partType
       , inTagInfo = tyPart.inTagInfo
       }
@@ -1261,6 +1269,13 @@ getAttrFieldName headTypeName agi = do
     { haskellName = mkFieldName genOpts headTypeName agi.xmlName
     } :: AttrFieldGI)
 
+finalizeFieldName :: HaskellTypeName -> FieldGI -> CG FieldGI
+finalizeFieldName headTypeName fgi = do
+  genOpts <- asks genOpts
+  pure (fgi
+    { haskellName = mkFieldName genOpts headTypeName fgi.haskellName.unHaskellFieldName
+    } :: FieldGI)
+
 attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [AttrFieldGI]
 attributeToField headTypeName quals attr = case attr of
   AttrGrp AttrGroupRef{ref} -> do
@@ -1280,12 +1295,9 @@ attributeToField headTypeName quals attr = case attr of
       _ -> error "expected attribute group"
   Attr{aType, use = echo "use" -> use_} -> do
     typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) aType
-    genOpts <- asks genOpts
     pure $ List.singleton AttrFieldGI
-      -- { haskellName = attrNameToHaskellFieldName $ aName attr
-      { haskellName = mkFieldName genOpts headTypeName $ aName attr
+      { haskellName = error "single attr: should not be used before finalizing"
       , xmlName = aName attr
-      --, cardinality = RepMaybe
       , typeName
       , attrUse = use_
       }
@@ -1402,7 +1414,6 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     NE.NonEmpty Attr ->
     CG (HaskellTypeName, ContentWithAttrsGI)
   addAttrsToSimple attrs = do
-    genOpts <- asks genOpts
     typeName <- getUniqueTypeName possibleName.unXmlNameWN
     consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
     attrFields <- concat <$> mapM (attributeToField typeName quals) attrs
@@ -1412,8 +1423,11 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
       { typeName
       , consName
       , attributes = attrFields
-      , contentType = baseType
-      , contentFieldName = mkFieldName genOpts typeName "content"
+      , content = FieldGI
+        { haskellName = HaskellFieldName "content"
+        , typeName = typeNoAttrs baseType GBaseType
+        , inTagInfo = Nothing
+        }
       })
 
   mbAttrsExtension :: Maybe (NE.NonEmpty Attr)

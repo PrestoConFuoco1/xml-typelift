@@ -191,8 +191,9 @@ data ContentWithAttrsGI = ContentWithAttrsGI
   { typeName :: HaskellTypeName
   , consName :: HaskellConsName
   , attributes :: [AttrFieldGI]
-  , contentFieldName :: HaskellFieldName
-  , contentType :: HaskellTypeName
+--  , contentFieldName :: HaskellFieldName
+--  , contentType :: HaskellTypeName
+  , content :: FieldGI
   }
   deriving stock (Show, Generic)
 
@@ -220,7 +221,6 @@ data AttrFieldGI = AttrFieldGI
   }
   deriving stock (Show)
 
--- FIXME: this datatype shouldn't be used for attributes
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
   , typeName :: TypeWithAttrs
