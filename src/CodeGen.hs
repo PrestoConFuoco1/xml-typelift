@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE CPP                       #-}
@@ -55,6 +56,7 @@ import TypeDecls1 (TypeDecl (..), SumType)
 import qualified Data.List.NonEmpty as NE
 import Data.Bifunctor (Bifunctor(..))
 import Data.Char (isDigit, isUpper, toLower)
+import Data.Generics.Labels
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -992,15 +994,21 @@ registerParseFunction fBody = parseFunctions %= (fBody :)
 
 registerSequenceGI :: SequenceGI -> CG ()
 registerSequenceGI s = do
-  registerDataDeclaration $ Alg $ mkSequenceTypeDeclaration s
-  registerParseFunction $ generateSequenceParseFunctionBody s
-  registerExtractionFunction $ generateSequenceExtractFunctionBody s
+  attrsFin <- do
+    newAttrs <- forM s.attributes (getAttrFieldName s.typeName)
+    pure $ s & #attributes .~ newAttrs
+  registerDataDeclaration $ Alg $ mkSequenceTypeDeclaration attrsFin
+  registerParseFunction $ generateSequenceParseFunctionBody attrsFin
+  registerExtractionFunction $ generateSequenceExtractFunctionBody attrsFin
 
 registerAttrContent :: ContentWithAttrsGI -> CG ()
 registerAttrContent cgi = do
-  registerDataDeclaration $ Alg $ mkAttrContentTypeDeclaration cgi
-  registerParseFunction $ generateAttrContentParse cgi
-  registerExtractionFunction $ generateAttrContentExtract cgi
+  attrsFin <- do
+    newAttrs <- forM cgi.attributes (getAttrFieldName cgi.typeName)
+    pure $ cgi & #attributes .~ newAttrs
+  registerDataDeclaration $ Alg $ mkAttrContentTypeDeclaration attrsFin
+  registerParseFunction $ generateAttrContentParse attrsFin
+  registerExtractionFunction $ generateAttrContentExtract attrsFin
 
 registerChoiceGI :: ChoiceGI -> CG ()
 registerChoiceGI chGI = do
@@ -1244,16 +1252,22 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       }
   unexp -> error $ "anything other than Seq or Choice inside Complex is not supported: " <> show unexp
 
+getAttrFieldName :: HaskellTypeName -> AttrFieldGI -> CG AttrFieldGI
+getAttrFieldName headTypeName agi = do
+  genOpts <- asks genOpts
+  pure (agi
+    { haskellName = mkFieldName genOpts headTypeName agi.xmlName
+    } :: AttrFieldGI)
+
 attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [AttrFieldGI]
 attributeToField headTypeName quals attr = case attr of
   AttrGrp AttrGroupRef{ref} -> do
     TypeWithAttrs{giType} <- lookupHaskellTypeBySchemaType quals ref
-    genOpts <- asks genOpts
     let
+      modifyFieldName :: AttrFieldGI -> AttrFieldGI
       modifyFieldName field =
         AttrFieldGI
-          { haskellName =
-            mkFieldName genOpts headTypeName field.haskellName.unHaskellFieldName
+          { haskellName = error "should not be used before finalizing"
           , xmlName = field.xmlName
           , typeName = field.typeName
           , attrUse = field.attrUse

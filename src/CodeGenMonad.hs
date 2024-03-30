@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE CPP                        #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -117,6 +118,7 @@ import Data.String (IsString)
 import Data.Bifunctor (Bifunctor(..))
 import qualified Data.List.NonEmpty as NE
 import Text.InterpolatedString.Perl6
+import GHC.Generics (Generic)
 
 trace :: HasCallStack => String -> a -> a
 trace msg = Debug.Trace.trace (msg <> "\n  " <> prettyCallStack callStack)
@@ -192,7 +194,7 @@ data ContentWithAttrsGI = ContentWithAttrsGI
   , contentFieldName :: HaskellFieldName
   , contentType :: HaskellTypeName
   }
-  deriving stock (Show)
+  deriving stock (Show, Generic)
 
 -- GI stands for "generating input"
 -- type for processing sequence inside complexType
@@ -202,7 +204,7 @@ data SequenceGI = SequenceGI
   , attributes :: [AttrFieldGI]
   , fields :: [FieldGI]
   }
-  deriving stock (Show)
+  deriving stock (Show, Generic)
 
 data ChoiceGI = ChoiceGI
   { typeName :: HaskellTypeName

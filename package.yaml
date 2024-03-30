@@ -48,6 +48,7 @@ dependencies:
   - xeno
   - pretty-simple
   - string-conversions
+  - generic-lens
 
 flags:
   use-parser2:
