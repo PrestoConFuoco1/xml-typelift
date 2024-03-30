@@ -424,6 +424,24 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|parseGMonthContent = parseString|]
         outCodeLine' [qc|parseIntegerContent = parseString|]
         outCodeLine' [qc|parseIntContent = parseString|]
+        -- outCodeLine' [qc|parseUnitContent arrStart strStart = pure (arrStart, strStart)|]
+        outCodeLine' [qc|parseUnitContent arrStart strStart =|]
+        outCodeLine' [qc|  pure $ (arrStart,) $ parseUnitContentRec (0 :: Int) strStart|]
+        outCodeLine' [qc|parseUnitContentRec level strStart = do|]
+        outCodeLine' [qc|  let echoNbefore msg n = (msg <> ": " <> show (BS.takeEnd 10 $ BS.take n bs)) `trace` n|]
+        outCodeLine' [qc|  let echoWord8 msg x = (msg <> ": " <> show (Data.Char.chr $ fromIntegral x)) `trace` x|]
+        outCodeLine' [qc|  let startTagIdx = echo "startTagIdx" $ skipToOpenTag strStart|]
+        outCodeLine' [qc|      endTagIdx = echo "endTagIdx" $ skipToCloseTag startTagIdx|]
+        outCodeLine' [qc|  if startTagIdx `seq` endTagIdx `seq` (echo "isSlash" (echoWord8 "start+1" (bs `BSU.unsafeIndex` (startTagIdx+1)) == slashChar))|]
+        outCodeLine' [qc|    then|]
+        outCodeLine' [qc|      -- it's closing tag|]
+        outCodeLine' [qc|      (if level == 0 then startTagIdx else parseUnitContentRec (level - 1) endTagIdx)|]
+        outCodeLine' [qc|    else if bs `BSU.unsafeIndex` (endTagIdx - 1) == slashChar|]
+        outCodeLine' [qc|      -- empty tag, parsing further on the same level|]
+        outCodeLine' [qc|      then parseUnitContentRec level endTagIdx|]
+        outCodeLine' [qc|      -- open tag, one level deeper|]
+        outCodeLine' [qc|      else parseUnitContentRec (level+1) endTagIdx|]
+
         outCodeLine' [qc|parseInt64Content = parseString|]
         outCodeLine' [qc|parseDayContent = parseString|]
         outCodeLine' [qc|parseTimeOfDayContent = parseString|]
@@ -495,6 +513,7 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
         outCodeLine' [qc|    extractMany' ofs len =|]
         outCodeLine' [qc|      let (v, ofs') = subextr ofs|]
         outCodeLine' [qc|      in first (v:) $ extractMany' ofs' (len - 1)|]
+        outCodeLine' [qc|extractUnitContent ofs = ((), ofs)|]
         outCodeLine' [qc|extractXMLStringContent = extractStringContent|]
         outCodeLine' [qc|extractDateTimeContent :: Int -> (ZonedTime, Int)|]
         outCodeLine' [qc|extractDateTimeContent = extractAndParse zonedTimeStr|]
@@ -586,15 +605,15 @@ generateAuxiliaryFunctions = do
     outCodeLine' ""
     outCodeLine' ""
 
+{-
     outCodeLine' [qc|echo = \_ -> id|]
     outCodeLine' [qc|echoN = \_ _ -> id|]
-{-
+-}
     outCodeLine' [qc|echo :: Show a => String -> a -> a|]
     outCodeLine' [qc|echo msg x = (msg <> ": " <> show x) `trace` x|]
     outCodeLine' ""
     outCodeLine' [qc|echoN :: Show a => String -> Int -> a -> a|]
     outCodeLine' [qc|echoN msg n x = (msg <> ": " <> take n (show x)) `trace` x|]
--}
 
 generateParserTop :: CG ()
 generateParserTop = do
@@ -1577,6 +1596,7 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE DeriveAnyClass #-}"
     outCodeLine "{-# LANGUAGE RecordWildCards #-}"
     outCodeLine "{-# LANGUAGE ScopedTypeVariables #-}"
+    outCodeLine "{-# LANGUAGE TupleSections #-}"
     -- TODO also add in parser generator
     --
     --

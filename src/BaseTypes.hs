@@ -95,12 +95,13 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
       ,"type GYearMonth = Month"
       ,"type GYear = Year"
       ,"type GMonth = MonthOfYear"
+      ,"type Unit = ()"
       ]
 
 
 baseTranslations :: [(BS.ByteString, BS.ByteString)]
 baseTranslations =
-    [("any"            , "Xeno.Node"    )
+    [("any"            , "Unit")
     ,("string"         , "XMLString"    )
     ,("boolean"        , "Bool"         )
     ,("long"           , "Int64"        ) -- or Int64
