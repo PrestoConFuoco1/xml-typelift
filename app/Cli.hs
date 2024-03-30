@@ -151,7 +151,8 @@ optsParser =
                  <*> switch     (long "unsafe"                               <> help "Generate fast UNSAFE code")
                  <*> optional (strOption (long "toplevel" <> metavar "TOPLEVEL" <> help "The toplevel type required to be generated"))
                  <*> (UseXmlIsogenNaming <$> switch (long "isogen-naming" <> help "Use xml-isogen like naming conventions"))
-                 <*> (ShouldGenLenses <$> switch     (long "generate-lenses"                               <> help "Generate lenses")))
+                 <*> (ShouldGenLenses <$> switch     (long "generate-lenses"                               <> help "Generate lenses"))
+                 <*> (AllowDuplicatedFields <$> switch (long "allow-duplicated-fields" <> help "Whether to allow duplicated fields")))
              <*> (optional $
                  filenameOption (long "test-document" <> metavar "FILENAME"  <> help "Path to test document (.xml file) (turn on `--main` and turn off `--types`)"))
              <*> (switch        (long "print-result"                         <> help "Print result of test document parsing"))

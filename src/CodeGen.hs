@@ -16,7 +16,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE BlockArguments #-}
 -- | Here we aim to analyze the schema.
-module CodeGen(GenerateOpts(..), parserCodegen, codegen, UseXmlIsogenNaming (..), ShouldGenLenses (..)) where
+module CodeGen(GenerateOpts(..), parserCodegen, codegen, UseXmlIsogenNaming (..), ShouldGenLenses (..), AllowDuplicatedFields (..)) where
 
 import           Prelude                           hiding (id, lookup)
 
@@ -1092,18 +1092,29 @@ getUniqueTypeName raw = do
   allocatedHaskellTypes %= Set.insert res
   pure res
 
+getUniqueFieldName :: XMLString -> CG HaskellFieldName
+getUniqueFieldName raw = do
+  res <- getUniqueName HaskellFieldName raw (Lens.use allocatedFieldNames)
+  allocatedFieldNames %= Set.insert res
+  pure res
+
 mkFieldName ::
   GenerateOpts ->
   HaskellTypeName ->
   XMLString ->
-  HaskellFieldName
-mkFieldName opts typeName x =
-    HaskellFieldName $
+  CG HaskellFieldName
+mkFieldName opts typeName x = do
+  let AllowDuplicatedFields allowDup = opts.allowDuplicatedFields
+  if allowDup
+    then pure $ HaskellFieldName possibleName
+    else getUniqueFieldName possibleName
+  where
+  possibleName =
     (lensesPrefix <>) $
     if isogenNaming
-      then getMainLetters typeName.unHaskellTypeName <> (hackDropUnderscores $ normalizeTypeName x)
-      else x
-  where
+      then getMainLetters typeName.unHaskellTypeName <> hackDropUnderscores (normalizeTypeName x)
+      else normalizeTypeName x
+
   UseXmlIsogenNaming isogenNaming = opts.useXmlIsogenNaming
   ShouldGenLenses genLenses = opts.shouldGenerateLenses
   lensesPrefix = if genLenses then "_" else ""
@@ -1265,15 +1276,17 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
 getAttrFieldName :: HaskellTypeName -> AttrFieldGI -> CG AttrFieldGI
 getAttrFieldName headTypeName agi = do
   genOpts <- asks genOpts
+  newFieldName <- mkFieldName genOpts headTypeName agi.xmlName
   pure (agi
-    { haskellName = mkFieldName genOpts headTypeName agi.xmlName
+    { haskellName = newFieldName
     } :: AttrFieldGI)
 
 finalizeFieldName :: HaskellTypeName -> FieldGI -> CG FieldGI
 finalizeFieldName headTypeName fgi = do
   genOpts <- asks genOpts
+  newFieldName <- mkFieldName genOpts headTypeName fgi.haskellName.unHaskellFieldName
   pure (fgi
-    { haskellName = mkFieldName genOpts headTypeName fgi.haskellName.unHaskellFieldName
+    { haskellName = newFieldName
     } :: FieldGI)
 
 attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [AttrFieldGI]

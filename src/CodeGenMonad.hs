@@ -29,6 +29,7 @@ module CodeGenMonad(-- Code generation monad
                    ,Env (..)
                    ,UseXmlIsogenNaming (..)
                    ,ShouldGenLenses (..)
+                   ,AllowDuplicatedFields (..)
                    ,GenerateOpts (..)
                    ,runCodeGen
                    ,out
@@ -42,6 +43,7 @@ module CodeGenMonad(-- Code generation monad
                    ,extractFunctions
                    ,allocatedHaskellTypes
                    ,allocatedHaskellConses
+                   ,allocatedFieldNames
                    ,processedSchemaTypes
                    ,schemaTypesMap
                    
@@ -260,6 +262,7 @@ data CGState =
   CGState {
     _allocatedHaskellTypes :: Set.Set HaskellTypeName
   , _allocatedHaskellConses :: Set.Set HaskellConsName
+  , _allocatedFieldNames :: Set.Set HaskellFieldName
   , _knownTypes :: Map.Map XmlNameWN [(Namespace, TypeWithAttrs)]
   , _typeDecls :: [TypeDecl]
   , _parseFunctions :: [FunctionBody]
@@ -308,6 +311,9 @@ newtype UseXmlIsogenNaming = UseXmlIsogenNaming Bool
 newtype ShouldGenLenses = ShouldGenLenses Bool
   deriving Show
 
+newtype AllowDuplicatedFields = AllowDuplicatedFields Bool
+  deriving Show
+
 -- | Options for generating
 data GenerateOpts = GenerateOpts
     { isGenerateMainFunction :: Bool
@@ -315,10 +321,11 @@ data GenerateOpts = GenerateOpts
     , topName :: Maybe String
     , useXmlIsogenNaming :: UseXmlIsogenNaming
     , shouldGenerateLenses :: ShouldGenLenses
+    , allowDuplicatedFields :: AllowDuplicatedFields
     } deriving Show
 
 instance Default GenerateOpts where
-    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False) (ShouldGenLenses False)
+    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False) (ShouldGenLenses False) (AllowDuplicatedFields False)
 
 data Env = Env
   { genOpts :: GenerateOpts
@@ -346,6 +353,7 @@ initialState :: CGState
 initialState  = CGState
                (Set.fromList $ map (HaskellTypeName . snd) baseTranslations)
                (Set.fromList $ map (HaskellConsName . snd) baseTranslations)
+               Set.empty
                (Map.fromList $ map (bimap mkXmlNameWN ((:[]) . (defaultNamespace,) .  flip typeNoAttrs GBaseType . HaskellTypeName)) baseTranslations)
                []
                []
