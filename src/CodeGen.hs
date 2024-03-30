@@ -143,10 +143,12 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
       Alg rec -> declareAlgebraicType opts rec
       Newtype (t, c, wt) -> declareNewtype t c wt
       Sumtype sumtype -> declareSumType sumtype
-    forM_ declaredTypes \case
-      Alg (TyData tyDataRaw, _) -> outCodeLine [qc|makeLenses ''{tyDataRaw}|]
-      Newtype (TyData tyDataRaw, _, _) -> outCodeLine [qc|makePrisms ''{tyDataRaw}|]
-      Sumtype (TyData tyDataRaw, _) -> outCodeLine [qc|makePrisms ''{tyDataRaw}|]
+    let ShouldGenLenses genLenses = opts.shouldGenerateLenses
+    when genLenses $
+      forM_ declaredTypes \case
+        Alg (TyData tyDataRaw, _) -> outCodeLine [qc|makeLenses ''{tyDataRaw}|]
+        Newtype (TyData tyDataRaw, _, _) -> outCodeLine [qc|makePrisms ''{tyDataRaw}|]
+        Sumtype (TyData tyDataRaw, _) -> outCodeLine [qc|makePrisms ''{tyDataRaw}|]
     when genParser do
       outCodeLine [qc||]
       outCodeLine [qc|type TopLevel = {type_ topNameProcessed}|]
