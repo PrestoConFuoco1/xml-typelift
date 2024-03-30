@@ -636,27 +636,29 @@ generateMainFunction GenerateOpts{..} = trace "main" do
     outCodeLine' ""
 
 getSequenceAttrs :: SequenceGI -> AttributesInfo
-getSequenceAttrs s = case NE.nonEmpty $ map (fromJust . (.xmlName)) s.attributes of
+getSequenceAttrs s = case NE.nonEmpty $ map (.xmlName) s.attributes of
   Nothing -> NoAttrs
   Just a -> AttributesInfo a
 
 getExtContentAttrs :: ContentWithAttrsGI -> AttributesInfo
-getExtContentAttrs c = case NE.nonEmpty $ map (fromJust . (.xmlName)) c.attributes of
+getExtContentAttrs c = case NE.nonEmpty $ map (.xmlName) c.attributes of
   Nothing -> NoAttrs
   Just a -> AttributesInfo a
 
 mkChoiceTypeDeclaration :: ChoiceGI -> SumType
 mkChoiceTypeDeclaration ch =
   ( TyData $ B.byteString ch.typeName.unHaskellTypeName
-  , flip map ch.alts \(inTagInfo, _possibleTags, cons_, conType) -> do
-    (TyCon $ B.byteString cons_.unHaskellConsName, TyType $ mkTypeWithCardinality inTagInfo $ B.byteString conType.type_.unHaskellTypeName)
+  , flip map ch.alts \(inTagInfo, _possibleTags, cons_, conType) ->
+    ( TyCon $ B.byteString cons_.unHaskellConsName
+    , TyType $ mkTypeWithCardinality inTagInfo $ B.byteString conType.type_.unHaskellTypeName
+    )
   )
 
 mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
 mkSequenceTypeDeclaration s =
   (TyData $ B.byteString s.typeName.unHaskellTypeName
   , [ ( TyCon $ B.byteString s.consName.unHaskellConsName
-      , map mkFieldDeclaration $ map (, IsAttr True) s.attributes <> map (, IsAttr False) s.fields
+      , map mkAttrFieldDeclaration s.attributes <> map mkFieldDeclaration s.fields
       )
     ]
   )
@@ -665,7 +667,7 @@ mkAttrContentTypeDeclaration :: ContentWithAttrsGI -> (TyData, [Record])
 mkAttrContentTypeDeclaration cgi =
   ( TyData $ B.byteString cgi.typeName.unHaskellTypeName
   , [ ( TyCon $ B.byteString cgi.consName.unHaskellConsName
-      , map mkFieldDeclaration $ map (,IsAttr True) cgi.attributes <> map (, IsAttr False) [contentField]
+      , map mkAttrFieldDeclaration cgi.attributes <> map mkFieldDeclaration [contentField]
       )
     ]
   )
@@ -675,27 +677,15 @@ mkAttrContentTypeDeclaration cgi =
     -- TODO: maybe it's not the best idea to use FieldGI here
     FieldGI
       { haskellName = cgi.contentFieldName
-      , xmlName = Nothing
       , typeName = typeNoAttrs cgi.contentType GBaseType
       , inTagInfo = Nothing
-      , attrUse = Nothing
       }
 
-newtype IsAttr = IsAttr Bool
-
-mkFieldDeclaration :: (FieldGI, IsAttr) -> TyField
-mkFieldDeclaration (fld, IsAttr isAttr) =
+mkFieldDeclaration :: FieldGI -> TyField
+mkFieldDeclaration fld =
   ( TyFieldName $ B.byteString fld.haskellName.unHaskellFieldName
-  , TyType $ mkFieldType $ B.byteString fld.typeName.type_.unHaskellTypeName
+  , TyType $ mkTypeWithCardinality fld.inTagInfo $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
-  where
-  attrRequired = case fld.attrUse of
-    Just Required -> True
-    _ -> False
-  mkFieldType x =
-    if isAttr
-    then (if attrRequired then x else "Maybe " <> x)
-    else mkTypeWithCardinality fld.inTagInfo x
 
 mkTypeWithCardinality :: Maybe (a1, Repeatedness) -> B.Builder -> B.Builder
 mkTypeWithCardinality inTagInfo x = case inTagInfo of
@@ -704,6 +694,18 @@ mkTypeWithCardinality inTagInfo x = case inTagInfo of
     RepMaybe -> "Maybe " <> x
     RepOnce -> x
     _ -> "[" <> x <> "]"
+
+mkAttrFieldDeclaration :: AttrFieldGI -> TyField
+mkAttrFieldDeclaration fld =
+  ( TyFieldName $ B.byteString fld.haskellName.unHaskellFieldName
+  , TyType $ typeWithUse $ B.byteString fld.typeName.type_.unHaskellTypeName
+  )
+  where
+  attrRequired = fld.attrUse == Required
+  typeWithUse x =
+    if attrRequired
+    then x
+    else "Maybe " <> x
 
 {-
 exampleSequenceGI :: SequenceGI
@@ -857,7 +859,7 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
         let haskellTypeName = attr.typeName.type_
         let
           attrRequired = case attr.attrUse of
-            Just Required -> True
+            Required -> True
             _ -> False
         let
           requiredModifier =
@@ -881,9 +883,7 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
           let haskellAttrName = attr.haskellName
           let haskellTypeName = attr.typeName.type_
           let
-            attrRequired = case attr.attrUse of
-              Just Required -> True
-              _ -> False
+            attrRequired = attr.attrUse == Required
           let
             requiredModifier =
               if attrRequired
@@ -1114,7 +1114,7 @@ processAttrGroup ::
   [Attr] ->
   CG TypeWithAttrs
 processAttrGroup nm quals attrs = do
-  attrFields <- concat <$> mapM (attributeToField' False "" quals) attrs
+  attrFields <- concat <$> mapM (attributeToField "" quals) attrs
   let
     q =
       GSeq SequenceGI
@@ -1177,10 +1177,8 @@ processSeq mbPossibleName quals attrs seqParts = do
       { haskellName = case tyPart.inTagInfo of
         Nothing -> mkFieldName genOpts headTypeName tyPart.partType.type_.unHaskellTypeName
         Just (tagName, _) -> mkFieldName genOpts headTypeName tagName
-      , xmlName = Nothing
       , typeName = tyPart.partType
       , inTagInfo = tyPart.inTagInfo
-      , attrUse = Nothing
       }
 
 processChoice ::
@@ -1246,35 +1244,34 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       }
   unexp -> error $ "anything other than Seq or Choice inside Complex is not supported: " <> show unexp
 
-attributeToField = attributeToField' True
-
-attributeToField' :: Bool -> HaskellTypeName -> QualNamespace -> Attr -> CG [FieldGI]
-attributeToField' finalFieldName headTypeName quals attr = case attr of
+attributeToField :: HaskellTypeName -> QualNamespace -> Attr -> CG [AttrFieldGI]
+attributeToField headTypeName quals attr = case attr of
   AttrGrp AttrGroupRef{ref} -> do
     TypeWithAttrs{giType} <- lookupHaskellTypeBySchemaType quals ref
     genOpts <- asks genOpts
     let
       modifyFieldName field =
-        field
+        AttrFieldGI
           { haskellName =
-            if True -- finalFieldName
-            then mkFieldName genOpts headTypeName field.haskellName.unHaskellFieldName
-            else HaskellFieldName $ field.haskellName.unHaskellFieldName
+            mkFieldName genOpts headTypeName field.haskellName.unHaskellFieldName
+          , xmlName = field.xmlName
+          , typeName = field.typeName
+          , attrUse = field.attrUse
           }
     case giType of
-      GSeq seq_ | null seq_.fields -> pure $ map modifyFieldName seq_.attributes
+      GSeq seq_ | null seq_.fields ->
+        pure $ map modifyFieldName seq_.attributes
       _ -> error "expected attribute group"
   Attr{aType, use = echo "use" -> use_} -> do
     typeName <- processType quals (Just $ mkXmlNameWN $ aName attr) aType
     genOpts <- asks genOpts
-    pure $ List.singleton FieldGI
+    pure $ List.singleton AttrFieldGI
       -- { haskellName = attrNameToHaskellFieldName $ aName attr
       { haskellName = mkFieldName genOpts headTypeName $ aName attr
-      , xmlName = Just $ aName attr
+      , xmlName = aName attr
       --, cardinality = RepMaybe
       , typeName
-      , inTagInfo = Nothing
-      , attrUse = Just use_
+      , attrUse = use_
       }
 
 processType :: QualNamespace -> Maybe XmlNameWN -> Type -> CG TypeWithAttrs

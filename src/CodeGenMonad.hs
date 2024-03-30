@@ -84,6 +84,7 @@ module CodeGenMonad(-- Code generation monad
                    ,ContentWithAttrsGI (..)
                    ,knownBaseTypes
                    ,mkXmlNameWN
+                   ,AttrFieldGI (..)
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -187,7 +188,7 @@ data GIType
 data ContentWithAttrsGI = ContentWithAttrsGI
   { typeName :: HaskellTypeName
   , consName :: HaskellConsName
-  , attributes :: [FieldGI]
+  , attributes :: [AttrFieldGI]
   , contentFieldName :: HaskellFieldName
   , contentType :: HaskellTypeName
   }
@@ -198,7 +199,7 @@ data ContentWithAttrsGI = ContentWithAttrsGI
 data SequenceGI = SequenceGI
   { typeName :: HaskellTypeName
   , consName :: HaskellConsName
-  , attributes :: [FieldGI]
+  , attributes :: [AttrFieldGI]
   , fields :: [FieldGI]
   }
   deriving stock (Show)
@@ -209,13 +210,19 @@ data ChoiceGI = ChoiceGI
   }
   deriving stock (Show)
 
+data AttrFieldGI = AttrFieldGI
+  { haskellName :: HaskellFieldName
+  , xmlName :: XMLString
+  , typeName :: TypeWithAttrs
+  , attrUse :: Use
+  }
+  deriving stock (Show)
+
 -- FIXME: this datatype shouldn't be used for attributes
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
-  , xmlName :: Maybe XMLString
   , typeName :: TypeWithAttrs
   , inTagInfo :: Maybe (XMLString, Repeatedness)
-  , attrUse :: Maybe Use
   }
   deriving stock (Show)
 
