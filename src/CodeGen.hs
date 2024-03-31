@@ -340,18 +340,13 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|                return (cnt,     arrOfs', strOfs')|]
         outCodeLine' [qc|    {vecWrite} vec arrOfs cnt|]
         outCodeLine' [qc|    return (endArrOfs, endStrOfs)|]
-
-        -- ~~~~~~~~
-        -- возвращает вторым параметром True если перед закрытием тега идет '/'
         outCodeLine' [qc|ensureTag True expectedTag ofs|]
         outCodeLine' [qc|  | expectedTag == actualTagName =|]
         outCodeLine' [qc|      if bs `{bsIndex}` ofsToEnd == closeTagChar|]
         outCodeLine' [qc|        then Just (ofsToEnd + 1, False)|]
-        outCodeLine' [qc|      else if isSpaceChar (bs `{bsIndex}` ofsToEnd)|] -- TODO
-        outCodeLine' [qc|        then let ofs' = skipToCloseTag (ofs + BS.length expectedTag)|]
-        outCodeLine' [qc|             in Just (ofs' + 1, bs `{bsIndex}` (ofs' - 1) == slashChar)|]
         outCodeLine' [qc|      else|]
-        outCodeLine' [qc|        Nothing|]
+        outCodeLine' [qc|        let ofs' = skipToCloseTag (ofs + BS.length expectedTag)|]
+        outCodeLine' [qc|         in Just (ofs' + 1, bs `{bsIndex}` (ofs' - 1) == slashChar)|]
         outCodeLine' [qc|  | otherwise = Nothing|]
         outCodeLine' [qc|  where (actualTagName, ofsToEnd) = getTagName' ofs|]
         outCodeLine' [qc|ensureTag False expectedTag ofs|]
@@ -376,14 +371,11 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|      arrOfsAfterAttrs <- attrAlloc arrOfs|]
         outCodeLine' [qc|      if bs `BSU.unsafeIndex` ofsToEnd == closeTagChar|]
         outCodeLine' [qc|        then pure $ Just ((ofsToEnd + 1, arrOfsAfterAttrs), False)|]
-        outCodeLine' [qc|      else if isSpaceChar (bs `BSU.unsafeIndex` ofsToEnd)|]
-        outCodeLine' [qc|        then do|]
-        outCodeLine' [qc|          _failOfs <- STRef.readSTRef farthest|]
-        outCodeLine' [qc|          strOfsAfterAttrs <- parseAttributes attrRouting ofsToEnd arrOfs|]
-        outCodeLine' [qc|          let ofs' = skipToCloseTag strOfsAfterAttrs|]
-        outCodeLine' [qc|          pure $ Just ((ofs' + 1, arrOfsAfterAttrs), bs `BSU.unsafeIndex` (ofs' - 1) == slashChar)|]
-        outCodeLine' [qc|      else|]
-        outCodeLine' [qc|        pure Nothing|]
+        outCodeLine' [qc|      else do|]
+        outCodeLine' [qc|        _failOfs <- STRef.readSTRef farthest|]
+        outCodeLine' [qc|        strOfsAfterAttrs <- parseAttributes attrRouting ofsToEnd arrOfs|]
+        outCodeLine' [qc|        let ofs' = skipToCloseTag strOfsAfterAttrs|]
+        outCodeLine' [qc|        pure $ Just ((ofs' + 1, arrOfsAfterAttrs), bs `BSU.unsafeIndex` (ofs' - 1) == slashChar)|]
         outCodeLine' [qc|  | otherwise = pure Nothing|]
         outCodeLine' [qc|  where (actualTagName, ofsToEnd) = getTagName' ofs|]
 
@@ -604,6 +596,8 @@ generateAuxiliaryFunctions = do
     outCodeLine' "{-# INLINE fromRight' #-}"
     outCodeLine' ""
     outCodeLine' ""
+    outCodeLine' [qc|trace = \_ -> id|]
+    outCodeLine' "{-# INLINE trace #-}"
 
 {-
     outCodeLine' [qc|echo = \_ -> id|]

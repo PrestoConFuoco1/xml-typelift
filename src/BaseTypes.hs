@@ -52,7 +52,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
               ,"Control.Lens.TH"
               ,"qualified Data.STRef as STRef"
               ,"Data.ByteString (ByteString)"
-              ,"Debug.Trace"
+              -- ,"Debug.Trace"
               -- ,"Data.Char"
               ,"Data.Functor.Identity"
               ,"Data.Time.Format"
