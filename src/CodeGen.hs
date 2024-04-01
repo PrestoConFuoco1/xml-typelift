@@ -516,7 +516,7 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
             [ ("GYearMonth", "(readStringMaybe $ parseTimeM True defaultTimeLocale \"%Y-%-m\")")
             , ("GMonth", "(readStringMaybe parseGMonth)")
             , ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
-            , ("ZonedTime", "(readStringMaybe iso8601ParseM)")
+--            , ("ZonedTime", "(readStringMaybe iso8601ParseM)")
             , ("Duration", "parseDuration")
             ]
           mkParseRawTypeSig :: String -> String
@@ -531,12 +531,17 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
         for_ typesUsingCustomParsers \(t, p) -> do
           outCodeLine' $ mkParseRawTypeSig t
           outCodeLine' $ mkCustomParseRawBody t p
-        for_ ("Bool" : typesUsingReadInstance <> map fst typesUsingCustomParsers) \t -> do
+        for_ ("ZonedTime" : "Bool" : typesUsingReadInstance <> map fst typesUsingCustomParsers) \t -> do
           outCodeLine' [qc|extract{t}Content :: Int -> ({t}, Int)|]
           outCodeLine' [qc|extract{t}Content = extractAndParse parse{t}Raw|]
         outCodeLine' [qc|parseXMLStringRaw :: ByteString -> Either String ByteString|]
         outCodeLine' [qc|parseXMLStringRaw = pure|]
 
+        outCodeLine' [qc|parseZonedTimeRaw = readStringMaybe $ \x ->|]
+        outCodeLine' [qc|  asum|]
+        outCodeLine' [qc|    [ parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q%EZ" x|]
+        outCodeLine' [qc|    , parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q" x|]
+        outCodeLine' [qc|    ]|]
         outCodeLine' [qc|parseBoolRaw = \case|]
         outCodeLine' [qc|    "true" -> Right True|]
         outCodeLine' [qc|    "1" -> Right True|]

@@ -47,6 +47,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
               ,"Data.Time.Clock"
               -- TODO check imports:
               ,"Control.DeepSeq"
+              ,"Control.Applicative"
               ,"Control.Monad.Fix"
               ,"Control.Monad.ST"
               ,"Control.Lens.TH"
