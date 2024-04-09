@@ -34,6 +34,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
   where
     makeImport modPath = "import " <> modPath <> "\n"
     modules = ["Data.Maybe"
+              ,"Data.Fixed(Fixed(..))"
               ,"Data.Time.LocalTime(ZonedTime (..), TimeOfDay (..), LocalTime (..), utc, minutesToTimeZone)"
               ,"Data.Time.Format.ISO8601(iso8601ParseM)"
               ,"Data.Int(Int64)"

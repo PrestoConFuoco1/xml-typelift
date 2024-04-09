@@ -418,6 +418,8 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|parseGYearMonthContent = parseString|]
         outCodeLine' [qc|parseGYearContent = parseString|]
         outCodeLine' [qc|parseBoolContent = parseString|]
+        outCodeLine' [qc|parseDoubleContent = parseString|]
+        outCodeLine' [qc|parseFloatContent = parseString|]
         outCodeLine' [qc|parseGMonthContent = parseString|]
         outCodeLine' [qc|parseIntegerContent = parseString|]
         outCodeLine' [qc|parseIntContent = parseString|]
@@ -528,6 +530,8 @@ extractDateTimeContent = extractAndParse zonedTimeStr
             , ("GMonth", "(readStringMaybe parseGMonth)")
             , ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
             , ("Duration", "parseDuration")
+            , ("Double", "(fmap realToFrac . parseScientificRaw)")
+            , ("Float", "(fmap realToFrac . parseScientificRaw)")
             ]
           typesUsingCustomParsers = ["Scientific", "ZonedTime", "Bool"]
           mkParseRawTypeSig :: String -> String
@@ -600,6 +604,7 @@ fromFlatparseResult = \\case
   FP.Fail -> Left "failed"
   FP.Err e -> Left e
 fpSkipAsciiChar c = FP.skipSatisfyAscii (== c)
+
 parseZonedTimeRaw :: ByteString -> Either String ZonedTime
 parseZonedTimeRaw bsInp = runFlatparser bsInp do
   year <- FP.anyAsciiDecimalInteger
@@ -612,8 +617,23 @@ parseZonedTimeRaw bsInp = runFlatparser bsInp do
   fpSkipAsciiChar ':'
   minutes <- FP.anyAsciiDecimalInt
   fpSkipAsciiChar ':'
-  seconds <- FP.anyAsciiDecimalInt
-  let zUtc = fpSkipAsciiChar 'Z' >> pure utc
+  secondsInteger <- FP.anyAsciiDecimalInteger
+  let
+    mbSecondsFracParser = asum
+      [ fpSkipAsciiChar '.' >> fmap Just FP.anyAsciiDecimalInteger
+      , pure Nothing
+      ]
+  secondsFrac <- FP.withByteString mbSecondsFracParser \\mSf sBs ->
+    case mSf of
+      Nothing -> pure 0
+      Just sF -> do
+        let len = BS.length sBs - 1
+        if len <= 12
+        then pure $ sF * 10 ^ (12 - len)
+        else pure $ sF `div` (10 ^ (len - 12))
+
+  let seconds = MkFixed $ secondsInteger * 1_000_000_000_000 + secondsFrac
+      zUtc = fpSkipAsciiChar 'Z' >> pure utc
       offsetTz = do
         sign :: Int <- asum [fpSkipAsciiChar '+' >> pure 1, fpSkipAsciiChar '-' >> pure (-1)]
         tzHr <- FP.anyAsciiDecimalInt
@@ -625,10 +645,11 @@ parseZonedTimeRaw bsInp = runFlatparser bsInp do
   pure ZonedTime
     { zonedTimeToLocalTime = LocalTime
       { localDay = fromGregorian year month day
-      , localTimeOfDay = TimeOfDay hours minutes $ fromIntegral seconds
+      , localTimeOfDay = TimeOfDay hours minutes seconds
       }
     , zonedTimeZone = tz
     }
+
 parseScientificRaw :: ByteString -> Either String Scientific
 parseScientificRaw bsInp = runFlatparser bsInp do
   let getSign = do
@@ -1681,6 +1702,7 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE RecordWildCards #-}"
     outCodeLine "{-# LANGUAGE ScopedTypeVariables #-}"
     outCodeLine "{-# LANGUAGE TupleSections #-}"
+    outCodeLine "{-# LANGUAGE NumericUnderscores #-}"
     -- TODO also add in parser generator
     --
     --
