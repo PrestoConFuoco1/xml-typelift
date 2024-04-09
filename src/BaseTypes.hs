@@ -76,7 +76,6 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
               ,"System.Exit (exitSuccess, exitFailure)"
               ,"System.IO (hPutStrLn, stderr)"
               ,"Control.Monad"
-              ,"Text.ParserCombinators.ReadP"
               ]
               ++ vectorModules
               ++ additionalBytestringModules

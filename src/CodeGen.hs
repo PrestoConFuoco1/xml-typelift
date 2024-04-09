@@ -213,7 +213,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
             withIndent $ do
                 outCodeLine' [qc|{vecWrite} vec (0::Int) (0::Int)|]
                 outCodeLine' [qc|let arrOfs0 = 0|]
-                outCodeLine' [qc|let strOfs0 = (skipSpaces $ skipHeader $ skipSpaces 0)|]
+                outCodeLine' [qc|let strOfs0 = skipSpaces $ skipHeader $ skipSpaces 0|]
                 let
                   parseElementCall = generateParseElementCall ("arrOfs0", "strOfs0") (Just (topTag, repeatedness)) topType
                 outCodeLine' [qc|(_, _) <- {parseElementCall}|]
@@ -520,33 +520,25 @@ extractMany ofs subextr = extractMany' (ofs + 1) (arr #{index} ofs)
       in first (v:) $ extractMany' ofs' (len - 1)
 extractUnitContent ofs = ((), ofs)
 extractXMLStringContent = extractStringContent
-extractDateTimeContent :: Int -> (ZonedTime, Int)
-extractDateTimeContent = extractAndParse zonedTimeStr
 |]
         let
-          typesUsingReadInstance = 
-            ["Integer", "Int", "Int64"] :: [String]
           typesUsingCustomShortParsers :: [(String, String)] =
             [ ("Duration", "parseDuration")
-            , ("Double", "(fmap realToFrac . parseScientificRaw)")
-            , ("Float", "(fmap realToFrac . parseScientificRaw)")
+            , ("Double", "fmap realToFrac . parseScientificRaw")
+            , ("Float", "fmap realToFrac . parseScientificRaw")
             , ("GYear", "parseIntegerRaw")
+            , ("Int64", "fmap fromIntegral . parseIntRaw")
             ]
           typesUsingCustomParsers =
-            ["Scientific", "XTime", "XDateTime", "Bool", "GYearMonth", "GMonth", "Day", "TimeOfDay"]
+            ["Scientific", "XTime", "XDateTime", "Bool", "GYearMonth", "GMonth", "Day", "Int", "Integer"]
           mkParseRawTypeSig :: String -> String
           mkParseRawTypeSig t = [int||parse#{t}Raw :: ByteString -> Either String #{t}|]
-          readInstanceParseRawBody :: String -> String
-          readInstanceParseRawBody t = [int||parse#{t}Raw = readEither|]
           mkCustomParseRawBody :: String -> String -> String
           mkCustomParseRawBody t parse_ = [int||parse#{t}Raw = #{parse_}|]
-        for_ typesUsingReadInstance \t -> do
-          outCodeLine' $ mkParseRawTypeSig t
-          outCodeLine' $ readInstanceParseRawBody t
         for_ typesUsingCustomShortParsers \(t, p) -> do
           outCodeLine' $ mkParseRawTypeSig t
           outCodeLine' $ mkCustomParseRawBody t p
-        for_ (typesUsingCustomParsers <> typesUsingReadInstance <> map fst typesUsingCustomShortParsers) \t -> do
+        for_ (typesUsingCustomParsers <> map fst typesUsingCustomShortParsers) \t -> do
           outCodeLine' [int||extract#{t}Content :: Int -> (#{t}, Int)|]
           outCodeLine' [int||extract#{t}Content = extractAndParse parse#{t}Raw|]
 
@@ -564,26 +556,12 @@ extractAndParse :: (ByteString -> Either String a) -> Int -> (a, Int)
 extractAndParse parser ofs = first (catchErr ofs parser) $ extractStringContent ofs
 
 catchErr :: Int -> (ByteString -> Either String b) -> ByteString -> b
-catchErr ofs f str = either (\\msg -> parseError bsofs bs msg) id (f str)
+catchErr ofs f str = either (parseError bsofs bs) id (f str)
   where bsofs = arr #{index} ofs
-readEither :: Read a => ByteString -> Either String a
-readEither str =
-    case reads (BSC.unpack str) of
-        [(a, [])] -> Right a
-        _ -> Left $ "Can't parse " ++ show str
-readStringMaybe :: (String -> Maybe a) -> ByteString -> Either String a
-readStringMaybe strParser input =
-  case strParser (BSC.unpack input) of
-    Just res -> pure res
-    Nothing -> Left $ "Can't parse " ++ show input
-fst3 (x, _, _) = x
-snd3 (_, y, _) = y
-thrd3 (_, _, z) = z
-dayYear = fst3 . toGregorian
-dayMonthOfYear = snd3 . toGregorian
 
 runFlatparser :: ByteString -> FP.Parser String a -> Either String a
 runFlatparser bsInp parser = fromFlatparseResult $ FP.runParser parser bsInp 
+
 fromFlatparseResult :: FP.Result String a -> Either String a
 fromFlatparseResult = \\case
   FP.OK res unconsumed -> do
@@ -618,9 +596,6 @@ parseDayFlat = do
   fpSkipAsciiChar '-'
   day <- FP.anyAsciiDecimalInt
   pure $ fromGregorian year month day
-
-parseTimeOfDayRaw :: ByteString -> Either String TimeOfDay
-parseTimeOfDayRaw bsInp = runFlatparser bsInp parseTimeOfDayFlat
 
 parseTimeOfDayFlat :: FP.Parser String TimeOfDay
 parseTimeOfDayFlat = do
@@ -682,14 +657,16 @@ parseTimeZoneFlat = do
         pure $ minutesToTimeZone $ sign * (tzHr * 60 + tzMin)
   asum [zUtc, offsetTz]
 
+getSign :: FP.Parser String Int
+getSign = do
+  let
+    getSign' = do
+      c <- FP.satisfyAscii (\\c -> c == '+' || c == '-')
+      pure $ if c == '-' then (-1) else 1
+  getSign' <|> pure 1
+
 parseScientificRaw :: ByteString -> Either String Scientific
 parseScientificRaw bsInp = runFlatparser bsInp do
-  let getSign = do
-        let
-          getSign' = do
-            c <- FP.satisfyAscii (\\c -> c == '+' || c == '-')
-            pure $ if c == '-' then (-1) else 1
-        getSign' <|> pure 1
   coefSign <- getSign
   n <- FP.anyAsciiDecimalInteger
   (SP nWithFrac afterPointExp) <- asum
@@ -713,6 +690,18 @@ parseScientificRaw bsInp = runFlatparser bsInp do
     ]
   pure $ scientific (fromIntegral coefSign * nWithFrac) (afterPointExp + exp_)
 
+parseIntRaw :: ByteString -> Either String Int
+parseIntRaw bsInp = runFlatparser bsInp do
+  coefSign <- getSign
+  n <- FP.anyAsciiDecimalInt
+  pure $ coefSign * n
+
+parseIntegerRaw :: ByteString -> Either String Integer
+parseIntegerRaw bsInp = runFlatparser bsInp do
+  coefSign <- getSign
+  n <- FP.anyAsciiDecimalInteger
+  pure $ fromIntegral coefSign * n
+
 |]
 
     index | isUnsafe  = "`V.unsafeIndex`" :: String
@@ -721,22 +710,6 @@ parseScientificRaw bsInp = runFlatparser bsInp do
 
 generateAuxiliaryFunctions :: CG ()
 generateAuxiliaryFunctions = do
-    outCodeLine' ""
-    outCodeLine' ""
-    outCodeLine' [qc|zonedTimeStr :: ByteString -> Either String ZonedTime|]
-    outCodeLine' [qc|zonedTimeStr str =|]
-    outCodeLine' [qc|    case (readP_to_S (readPTime True defaultTimeLocale fmt) $ BSC.unpack str) of|]
-    outCodeLine' [qc|        [(dt, [])] -> Right dt|]
-    outCodeLine' [qc|        _          -> Left ("Can't parse " ++ show str)|]
-    outCodeLine' [qc|  where|]
-    outCodeLine' [qc|    fmt = iso8601DateFormat (Just "%H:%M:%S%Q%Z")|]
-    outCodeLine' "{-# INLINE zonedTimeStr #-}"
-    outCodeLine' ""
-    -- `fromRight` appears only in base 4.10, and not available on GHC 8.0, so we use own
-    outCodeLine' [qc|fromRight' :: b -> Either a b -> b|]
-    outCodeLine' [qc|fromRight' _ (Right b) = b|]
-    outCodeLine' [qc|fromRight' b _         = b|]
-    outCodeLine' "{-# INLINE fromRight' #-}"
     outCodeLine' ""
     outCodeLine' ""
     outCodeLine' [qc|trace = \_ -> id|]
@@ -868,20 +841,6 @@ mkAttrFieldDeclaration fld =
     if attrRequired
     then x
     else "Maybe " <> x
-
-{-
-exampleSequenceGI :: SequenceGI
-exampleSequenceGI = SequenceGI
-  { typeName = "TestType"
-  , consName = "TestCons"
-  , attributes = []
-  , fields =
-    [ FieldGI "departure" "departureElt" RepMaybe $ typeNoAttrs "String" GBaseType
-    , FieldGI "arrival" "arrivalElt" RepOnce $ typeNoAttrs "Int" GBaseType
-    , FieldGI "techStops" "techStopsElt" RepMany $ typeNoAttrs "TechStop" GBaseType
-    ]
-  }
--}
 
 type CodeWriter' = ReaderT Int (Writer [String])
 type CodeWriter = CodeWriter' ()
