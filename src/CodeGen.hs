@@ -444,7 +444,8 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|parseInt64Content = parseString|]
         outCodeLine' [qc|parseDayContent = parseString|]
         outCodeLine' [qc|parseTimeOfDayContent = parseString|]
-        outCodeLine' [qc|parseZonedTimeContent = parseString|]
+        outCodeLine' [qc|parseXDateTimeContent = parseString|]
+        outCodeLine' [qc|parseXTimeContent = parseString|]
         outCodeLine' [qc|parseBooleanContent = parseString|]
         outCodeLine' [qc|skipSpaces ofs|]
         outCodeLine' [qc|  | isSpaceChar (bs `{bsIndex}` ofs) = skipSpaces (ofs + 1)|]
@@ -526,14 +527,13 @@ extractDateTimeContent = extractAndParse zonedTimeStr
           typesUsingReadInstance = 
             ["Integer", "Int", "Int64"] :: [String]
           typesUsingCustomShortParsers :: [(String, String)] =
-            [ ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
-            , ("Duration", "parseDuration")
+            [ ("Duration", "parseDuration")
             , ("Double", "(fmap realToFrac . parseScientificRaw)")
             , ("Float", "(fmap realToFrac . parseScientificRaw)")
             , ("GYear", "parseIntegerRaw")
             ]
           typesUsingCustomParsers =
-            ["Scientific", "ZonedTime", "Bool", "GYearMonth", "GMonth", "Day"]
+            ["Scientific", "XTime", "XDateTime", "Bool", "GYearMonth", "GMonth", "Day", "TimeOfDay"]
           mkParseRawTypeSig :: String -> String
           mkParseRawTypeSig t = [int||parse#{t}Raw :: ByteString -> Either String #{t}|]
           readInstanceParseRawBody :: String -> String
@@ -619,10 +619,11 @@ parseDayFlat = do
   day <- FP.anyAsciiDecimalInt
   pure $ fromGregorian year month day
 
-parseZonedTimeRaw :: ByteString -> Either String ZonedTime
-parseZonedTimeRaw bsInp = runFlatparser bsInp do
-  day <- parseDayFlat
-  fpSkipAsciiChar 'T'
+parseTimeOfDayRaw :: ByteString -> Either String TimeOfDay
+parseTimeOfDayRaw bsInp = runFlatparser bsInp parseTimeOfDayFlat
+
+parseTimeOfDayFlat :: FP.Parser String TimeOfDay
+parseTimeOfDayFlat = do
   hours <- FP.anyAsciiDecimalInt
   fpSkipAsciiChar ':'
   minutes <- FP.anyAsciiDecimalInt
@@ -643,22 +644,43 @@ parseZonedTimeRaw bsInp = runFlatparser bsInp do
         else pure $ sF `div` (10 ^ (len - 12))
 
   let seconds = MkFixed $ secondsInteger * 1_000_000_000_000 + secondsFrac
-      zUtc = fpSkipAsciiChar 'Z' >> pure utc
+  pure $ TimeOfDay hours minutes seconds
+
+parseXDateTimeRaw :: ByteString -> Either String XDateTime
+parseXDateTimeRaw bsInp = runFlatparser bsInp do
+  day <- parseDayFlat
+  fpSkipAsciiChar 'T'
+  timeOfDay <- parseTimeOfDayFlat
+  mbTimeZone <- FP.optional $ parseTimeZoneFlat
+  FP.skipMany $ FP.skipSatisfyAscii Data.Char.isSpace
+  pure WithTimezone
+    { value = LocalTime
+      { localDay = day
+      , localTimeOfDay = timeOfDay
+      }
+    , timezone = mbTimeZone
+    }
+
+parseXTimeRaw :: ByteString -> Either String XTime
+parseXTimeRaw bsInp = runFlatparser bsInp do
+  timeOfDay <- parseTimeOfDayFlat
+  mbTimeZone <- FP.optional parseTimeZoneFlat
+  FP.skipMany $ FP.skipSatisfyAscii Data.Char.isSpace
+  pure WithTimezone
+    { value = timeOfDay
+    , timezone = mbTimeZone
+    }
+
+parseTimeZoneFlat :: FP.Parser String TimeZone
+parseTimeZoneFlat = do
+  let zUtc = fpSkipAsciiChar 'Z' >> pure utc
       offsetTz = do
         sign :: Int <- asum [fpSkipAsciiChar '+' >> pure 1, fpSkipAsciiChar '-' >> pure (-1)]
         tzHr <- FP.anyAsciiDecimalInt
         fpSkipAsciiChar ':'
         tzMin <- FP.anyAsciiDecimalInt
         pure $ minutesToTimeZone $ sign * (tzHr * 60 + tzMin)
-  tz <- asum [zUtc, offsetTz, pure utc]
-  FP.skipMany $ FP.skipSatisfyAscii Data.Char.isSpace
-  pure ZonedTime
-    { zonedTimeToLocalTime = LocalTime
-      { localDay = day
-      , localTimeOfDay = TimeOfDay hours minutes seconds
-      }
-    , zonedTimeZone = tz
-    }
+  asum [zUtc, offsetTz]
 
 parseScientificRaw :: ByteString -> Either String Scientific
 parseScientificRaw bsInp = runFlatparser bsInp do
