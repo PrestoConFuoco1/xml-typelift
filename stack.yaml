@@ -10,5 +10,7 @@ extra-deps:
 - bytestring-mmap-0.2.2@sha256:d04e6bc5a158dd292757d3b9b032beb8a2c43e768777d64a8289abf89f612f67,1282
 - perfect-vector-shuffle-0.1.1.1@sha256:40f555585ec7b56bb329630d63749fc916031f944dd6287dadb844ceeccfddde,3989
 - megaparsec-8.0.0
+- nyan-interpolation-0.9.1@sha256:20831c22bb93d9d15a3d522d3188682336026d447f0930485c5793faa2819819,4233
+- nyan-interpolation-core-0.9.1@sha256:4dee931adea5662e6eff5635cf1f2fd6a35dc723f15c5dae98ecd400d008c4b7,4480
 allow-newer: true
 system-ghc: true

@@ -49,6 +49,7 @@ dependencies:
   - pretty-simple
   - string-conversions
   - generic-lens
+  - nyan-interpolation
 
 flags:
   use-parser2:

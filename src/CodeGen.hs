@@ -57,6 +57,7 @@ import qualified Data.List.NonEmpty as NE
 import Data.Bifunctor (Bifunctor(..))
 import Data.Char (isDigit, isUpper, toLower)
 import Data.Generics.Labels
+import Text.Interpolation.Nyan
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -111,6 +112,10 @@ outCodeLine' msg = do
     ind <- getIndent
     outCodeLine ((replicate ind ' ') ++ msg)
 
+outCodeMultiLines :: String -> CG ()
+outCodeMultiLines msg = do
+  let ls = lines msg
+  mapM_ outCodeLine' ls
 
 withIndent :: CG a -> CG a
 withIndent act = do -- TODO use `bracket`
@@ -485,97 +490,177 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
             generateAuxiliaryFunctions_
   where
     generateAuxiliaryFunctions_ = do
-        outCodeLine' [qc|extractStringContent :: Int -> (ByteString, Int)|]
-        if isUnsafe then
-            outCodeLine' [qc|extractStringContent ofs = (echoN "extractStringContent:result" 15 $ BSU.unsafeTake bslen (BSU.unsafeDrop bsofs bs), ofs + 2)|]
-        else
-            outCodeLine' [qc|extractStringContent ofs = (BS.take bslen (BS.drop bsofs bs), ofs + 2)|]
-        outCodeLine' [qc|  where|]
-        outCodeLine' [qc|    bsofs = echo "extractStringContent:offset" $ arr {index} ofs|]
-        outCodeLine' [qc|    bslen = echo "extractStringContent:length" $ arr {index} (ofs + 1)|]
-        outCodeLine' [qc|extractMaybe ofs subextr|]
-        outCodeLine' [qc|  | arr {index} ofs == 0 = (Nothing, ofs + 1)|]
-        outCodeLine' [qc|  | otherwise                     = first Just $ subextr (ofs + 1)|]
-        outCodeLine' [qc|extractAttribute ofs subextr|]
-        outCodeLine' [qc|  | arr `V.unsafeIndex` ofs == 0 = (Nothing, ofs + 2)|]
-        outCodeLine' [qc|  | otherwise                     = first Just $ subextr ofs|]
-        outCodeLine' [qc|extractMany ofs subextr = extractMany' (ofs + 1) (arr {index} ofs)|]
-        outCodeLine' [qc|  where|]
-        outCodeLine' [qc|    extractMany' ofs 0   = ([], ofs)|]
-        outCodeLine' [qc|    extractMany' ofs len =|]
-        outCodeLine' [qc|      let (v, ofs') = subextr ofs|]
-        outCodeLine' [qc|      in first (v:) $ extractMany' ofs' (len - 1)|]
-        outCodeLine' [qc|extractUnitContent ofs = ((), ofs)|]
-        outCodeLine' [qc|extractXMLStringContent = extractStringContent|]
-        outCodeLine' [qc|extractDateTimeContent :: Int -> (ZonedTime, Int)|]
-        outCodeLine' [qc|extractDateTimeContent = extractAndParse zonedTimeStr|]
+        let
+          extrStrBody =
+            if isUnsafe then
+              [qc|extractStringContent ofs = (echoN "extractStringContent:result" 15 $ BSU.unsafeTake bslen (BSU.unsafeDrop bsofs bs), ofs + 2)|]
+            else
+              [qc|extractStringContent ofs = (BS.take bslen (BS.drop bsofs bs), ofs + 2)|]
+
+        outCodeMultiLines [int|D|
+extractStringContent :: Int -> (ByteString, Int)
+#{extrStrBody :: String}
+  where
+    bsofs = echo "extractStringContent:offset" $ arr #{index} ofs
+    bslen = echo "extractStringContent:length" $ arr #{index} (ofs + 1)
+extractMaybe ofs subextr
+  | arr #{index} ofs == 0 = (Nothing, ofs + 1)
+  | otherwise                     = first Just $ subextr (ofs + 1)
+extractAttribute ofs subextr
+  | arr `V.unsafeIndex` ofs == 0 = (Nothing, ofs + 2)
+  | otherwise                     = first Just $ subextr ofs
+extractMany ofs subextr = extractMany' (ofs + 1) (arr #{index} ofs)
+  where
+    extractMany' ofs 0   = ([], ofs)
+    extractMany' ofs len =
+      let (v, ofs') = subextr ofs
+      in first (v:) $ extractMany' ofs' (len - 1)
+extractUnitContent ofs = ((), ofs)
+extractXMLStringContent = extractStringContent
+extractDateTimeContent :: Int -> (ZonedTime, Int)
+extractDateTimeContent = extractAndParse zonedTimeStr
+|]
         let
           typesUsingReadInstance = 
-            ["Day", "GYear", "Scientific", "Integer", "Int", "Int64"] :: [String]
-          typesUsingCustomParsers :: [(String, String)] =
+            ["Day", "GYear", "Integer", "Int", "Int64"] :: [String]
+          typesUsingCustomShortParsers :: [(String, String)] =
             [ ("GYearMonth", "(readStringMaybe $ parseTimeM True defaultTimeLocale \"%Y-%-m\")")
             , ("GMonth", "(readStringMaybe parseGMonth)")
             , ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
---            , ("ZonedTime", "(readStringMaybe iso8601ParseM)")
             , ("Duration", "parseDuration")
             ]
+          typesUsingCustomParsers = ["Scientific", "ZonedTime", "Bool"]
           mkParseRawTypeSig :: String -> String
-          mkParseRawTypeSig t = [qc|parse{t}Raw :: ByteString -> Either String {t}|]
+          mkParseRawTypeSig t = [int||parse#{t}Raw :: ByteString -> Either String #{t}|]
           readInstanceParseRawBody :: String -> String
-          readInstanceParseRawBody t = [qc|parse{t}Raw = readEither|]
+          readInstanceParseRawBody t = [int||parse#{t}Raw = readEither|]
           mkCustomParseRawBody :: String -> String -> String
-          mkCustomParseRawBody t parse_ = [qc|parse{t}Raw = {parse_}|]
+          mkCustomParseRawBody t parse_ = [int||parse#{t}Raw = #{parse_}|]
         for_ typesUsingReadInstance \t -> do
           outCodeLine' $ mkParseRawTypeSig t
           outCodeLine' $ readInstanceParseRawBody t
-        for_ typesUsingCustomParsers \(t, p) -> do
+        for_ typesUsingCustomShortParsers \(t, p) -> do
           outCodeLine' $ mkParseRawTypeSig t
           outCodeLine' $ mkCustomParseRawBody t p
-        for_ ("ZonedTime" : "Bool" : typesUsingReadInstance <> map fst typesUsingCustomParsers) \t -> do
-          outCodeLine' [qc|extract{t}Content :: Int -> ({t}, Int)|]
-          outCodeLine' [qc|extract{t}Content = extractAndParse parse{t}Raw|]
-        outCodeLine' [qc|parseXMLStringRaw :: ByteString -> Either String ByteString|]
-        outCodeLine' [qc|parseXMLStringRaw = pure|]
+        for_ (typesUsingCustomParsers <> typesUsingReadInstance <> map fst typesUsingCustomShortParsers) \t -> do
+          outCodeLine' [int||extract#{t}Content :: Int -> (#{t}, Int)|]
+          outCodeLine' [int||extract#{t}Content = extractAndParse parse#{t}Raw|]
 
-        outCodeLine' [qc|parseZonedTimeRaw = readStringMaybe $ \x ->|]
-        outCodeLine' [qc|  asum|]
-        outCodeLine' [qc|    [ parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q%EZ" x|]
-        outCodeLine' [qc|    , parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q" x|]
-        outCodeLine' [qc|    ]|]
-        outCodeLine' [qc|parseBoolRaw = \case|]
-        outCodeLine' [qc|    "true" -> Right True|]
-        outCodeLine' [qc|    "1" -> Right True|]
-        outCodeLine' [qc|    "false"-> Right False|]
-        outCodeLine' [qc|    "0" -> Right False|]
-        outCodeLine' [qc|    unexp -> Left $ "unexpected bool value: " <> show unexp|]
-        outCodeLine' [qc|first f (a,b) = (f a, b)|]
-        outCodeLine' [qc|extractAndParse :: (ByteString -> Either String a) -> Int -> (a, Int)|]
-        outCodeLine' [qc|extractAndParse parser ofs = first (catchErr ofs parser) $ extractStringContent ofs|]
+        outCodeMultiLines [int|D|
+parseXMLStringRaw :: ByteString -> Either String ByteString
+parseXMLStringRaw = pure
+{-
+parseZonedTimeRaw = readStringMaybe $ \\x ->
+  asum
+    [ parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q%EZ" x
+    , parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q" x
+    ]
+-}
+parseBoolRaw = \\case
+    "true" -> Right True
+    "1" -> Right True
+    "false"-> Right False
+    "0" -> Right False
+    unexp -> Left $ "unexpected bool value: " <> show unexp
+first f (a,b) = (f a, b)
+extractAndParse :: (ByteString -> Either String a) -> Int -> (a, Int)
+extractAndParse parser ofs = first (catchErr ofs parser) $ extractStringContent ofs
 
-        outCodeLine' [qc|catchErr :: Int -> (ByteString -> Either String b) -> ByteString -> b|]
-        outCodeLine' [qc|catchErr ofs f str = either (\msg -> parseError bsofs bs msg) id (f str)|]
-        outCodeLine' [qc|  where bsofs = arr {index} ofs|]
-        outCodeLine' [qc|readEither :: Read a => ByteString -> Either String a|]
-        outCodeLine' [qc|readEither str =|]
-        outCodeLine' [qc|    case reads (BSC.unpack str) of|]
-        outCodeLine' [qc|        [(a, [])] -> Right a|]
-        outCodeLine' [qc|        _ -> Left $ "Can't parse " ++ show str|]
-        outCodeLine' [qc|readStringMaybe :: (String -> Maybe a) -> ByteString -> Either String a|]
-        outCodeLine' [qc|readStringMaybe strParser input =|]
-        outCodeLine' [qc|  case strParser (BSC.unpack input) of|]
-        outCodeLine' [qc|    Just res -> pure res|]
-        outCodeLine' [qc|    Nothing -> Left $ "Can't parse " ++ show input|]
-        outCodeLine' [qc|fst3 (x, _, _) = x|]
-        outCodeLine' [qc|snd3 (_, y, _) = y|]
-        outCodeLine' [qc|thrd3 (_, _, z) = z|]
-        outCodeLine' [qc|dayYear = fst3 . toGregorian|]
-        outCodeLine' [qc|dayMonthOfYear = snd3 . toGregorian|]
-        outCodeLine' [qc|parseGMonth str =|]
-        outCodeLine' [qc|  let stripped = dropWhile Data.Char.isSpace str in|]
-        outCodeLine' [qc|  if "--" `isPrefixOf` stripped|]
-        outCodeLine' [qc|  then fmap dayMonthOfYear $ parseTimeM True defaultTimeLocale "%-m" $ drop 2 stripped|]
-        outCodeLine' [qc|  else Nothing|]
+catchErr :: Int -> (ByteString -> Either String b) -> ByteString -> b
+catchErr ofs f str = either (\\msg -> parseError bsofs bs msg) id (f str)
+  where bsofs = arr #{index} ofs
+readEither :: Read a => ByteString -> Either String a
+readEither str =
+    case reads (BSC.unpack str) of
+        [(a, [])] -> Right a
+        _ -> Left $ "Can't parse " ++ show str
+readStringMaybe :: (String -> Maybe a) -> ByteString -> Either String a
+readStringMaybe strParser input =
+  case strParser (BSC.unpack input) of
+    Just res -> pure res
+    Nothing -> Left $ "Can't parse " ++ show input
+fst3 (x, _, _) = x
+snd3 (_, y, _) = y
+thrd3 (_, _, z) = z
+dayYear = fst3 . toGregorian
+dayMonthOfYear = snd3 . toGregorian
+parseGMonth str =
+  let stripped = dropWhile Data.Char.isSpace str in
+  if "--" `isPrefixOf` stripped
+  then fmap dayMonthOfYear $ parseTimeM True defaultTimeLocale "%-m" $ drop 2 stripped
+  else Nothing
 
+runFlatparser :: ByteString -> FP.Parser String a -> Either String a
+runFlatparser bsInp parser = fromFlatparseResult $ FP.runParser parser bsInp 
+fromFlatparseResult :: FP.Result String a -> Either String a
+fromFlatparseResult = \\case
+  FP.OK res unconsumed -> do
+    unless (BS.null unconsumed) (Left $ "unconsumed " <> show unconsumed)
+    pure res
+  FP.Fail -> Left "failed"
+  FP.Err e -> Left e
+fpSkipAsciiChar c = FP.skipSatisfyAscii (== c)
+parseZonedTimeRaw :: ByteString -> Either String ZonedTime
+parseZonedTimeRaw bsInp = runFlatparser bsInp do
+  year <- FP.anyAsciiDecimalInteger
+  fpSkipAsciiChar '-'
+  month <- FP.anyAsciiDecimalInt
+  fpSkipAsciiChar '-'
+  day <- FP.anyAsciiDecimalInt
+  fpSkipAsciiChar 'T'
+  hours <- FP.anyAsciiDecimalInt
+  fpSkipAsciiChar ':'
+  minutes <- FP.anyAsciiDecimalInt
+  fpSkipAsciiChar ':'
+  seconds <- FP.anyAsciiDecimalInt
+  let zUtc = fpSkipAsciiChar 'Z' >> pure utc
+      offsetTz = do
+        sign :: Int <- asum [fpSkipAsciiChar '+' >> pure 1, fpSkipAsciiChar '-' >> pure (-1)]
+        tzHr <- FP.anyAsciiDecimalInt
+        fpSkipAsciiChar ':'
+        tzMin <- FP.anyAsciiDecimalInt
+        pure $ minutesToTimeZone $ sign * (tzHr * 60 + tzMin)
+  tz <- asum [zUtc, offsetTz, pure utc]
+  FP.skipMany $ FP.skipSatisfyAscii Data.Char.isSpace
+  pure ZonedTime
+    { zonedTimeToLocalTime = LocalTime
+      { localDay = fromGregorian year month day
+      , localTimeOfDay = TimeOfDay hours minutes $ fromIntegral seconds
+      }
+    , zonedTimeZone = tz
+    }
+parseScientificRaw :: ByteString -> Either String Scientific
+parseScientificRaw bsInp = runFlatparser bsInp do
+  let getSign = do
+        let
+          getSign' = do
+            c <- FP.satisfyAscii (\\c -> c == '+' || c == '-')
+            pure $ if c == '-' then (-1) else 1
+        getSign' <|> pure 1
+  coefSign <- getSign
+  n <- FP.anyAsciiDecimalInteger
+  (SP nWithFrac afterPointExp) <- asum
+    [ do
+      fpSkipAsciiChar '.'
+      FP.withByteString FP.anyAsciiDecimalInteger \\m mBs ->
+        pure $ SP (n * (10 ^ BS.length mBs) + m) (negate $ BS.length mBs)
+    , pure $ SP n 0
+    ]
+  let
+    eP = do
+      eSign <- getSign
+      e <- FP.anyAsciiDecimalInt
+      pure $ eSign * e
+    isE c = c == 'e' || c == 'E'
+  exp_ <- asum
+    [ do
+      FP.skipSatisfyAscii isE
+      eP
+    , pure 0
+    ]
+  pure $ scientific (fromIntegral coefSign * nWithFrac) (afterPointExp + exp_)
+
+|]
 
     index | isUnsafe  = "`V.unsafeIndex`" :: String
           | otherwise = "V.!"

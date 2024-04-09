@@ -34,15 +34,18 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
   where
     makeImport modPath = "import " <> modPath <> "\n"
     modules = ["Data.Maybe"
-              ,"Data.Time.LocalTime(ZonedTime, TimeOfDay)"
+              ,"Data.Time.LocalTime(ZonedTime (..), TimeOfDay (..), LocalTime (..), utc, minutesToTimeZone)"
               ,"Data.Time.Format.ISO8601(iso8601ParseM)"
               ,"Data.Int(Int64)"
-              ,if isUnsafe then "Data.Scientific (Scientific)" else "Data.Scientific.Safe (Scientific)"
+              ,if isUnsafe
+               then "Data.Scientific (Scientific, scientific)"
+               else "Data.Scientific.Safe (Scientific, scientific)"
               ,"Data.Time.ISO8601.Duration"
               -- ,"FromXML"
               ,"Errors"
               ,"qualified Data.Char"
-              ,"Data.Time.Calendar(Day, Year, MonthOfYear, toGregorian)"
+              ,"qualified FlatParse.Basic as FP"
+              ,"Data.Time.Calendar(Day, Year, MonthOfYear, toGregorian, fromGregorian)"
               ,"Data.Time.Calendar.Month"
               ,"Data.Time.Clock"
               -- TODO check imports:
@@ -97,6 +100,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
       ,"type GYear = Year"
       ,"type GMonth = MonthOfYear"
       ,"type Unit = ()"
+      ,"data SP = SP !Integer {-# UNPACK #-} !Int"
       ]
 
 
