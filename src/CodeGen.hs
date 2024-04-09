@@ -237,244 +237,245 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         --
         -- TODO read this from file!
         --
-        outCodeLine' [qc|toError tag strOfs act = do|]
-        outCodeLine' [qc|    act >>= \case|]
-        outCodeLine' [qc|        Nothing -> failExp ("<" <> tag) strOfs|]
-        outCodeLine' [qc|        Just res -> return res|]
-        outCodeLine' [qc|getTagName :: Int -> XMLString|]
-        -- outCodeLine' [qc|getTagName strOfs = BS.takeWhile (\c -> not (isSpaceChar c || c == closeTagChar || c == slashChar)) $ BS.drop (skipToOpenTag strOfs + 1) bs|]
-        outCodeLine' [qc|getTagName strOfs = fst $ getTagName' $ (skipToOpenTag strOfs + 1)|]
-        outCodeLine' [qc|getTagName' :: Int -> (XMLString, Int)|]
-        outCodeLine' [qc|getTagName' strOfs = do|]
-        outCodeLine' [qc|  let isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar|]
-        outCodeLine' [qc|      isQualDelim c = c == colonChar|]
-        outCodeLine' [qc|      noColon = BS.takeWhile (\c -> not (isAfterTag c || isQualDelim c)) $ BS.drop strOfs bs|]
-        outCodeLine' [qc|      afterNoColonOfs = strOfs + BS.length noColon|]
-        outCodeLine' [qc|  if bs `BSU.unsafeIndex` afterNoColonOfs /= colonChar|]
-        outCodeLine' [qc|  then (noColon, afterNoColonOfs)|]
-        outCodeLine' [qc|  else do|]
-        outCodeLine' [qc|    let|]
-        outCodeLine' [qc|      afterColon = BS.takeWhile (not . isAfterTag) $ BS.drop (afterNoColonOfs + 1) bs|]
-        outCodeLine' [qc|    (afterColon, afterNoColonOfs + 1 + BS.length afterColon)|]
+      outCodeMultiLines [int|D|
+toError tag strOfs act = do
+    act >>= \\case
+        Nothing -> failExp ("<" <> tag) strOfs
+        Just res -> return res
+getTagName :: Int -> XMLString
+getTagName strOfs = BS.takeWhile (\\c -> not (isSpaceChar c || c == closeTagChar || c == slashChar)) $ BS.drop (skipToOpenTag strOfs + 1) bs
+getTagName strOfs = fst $ getTagName' $ (skipToOpenTag strOfs + 1)
+getTagName' :: Int -> (XMLString, Int)
+getTagName' strOfs = do
+  let isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar
+      isQualDelim c = c == colonChar
+      noColon = BS.takeWhile (\\c -> not (isAfterTag c || isQualDelim c)) $ BS.drop strOfs bs
+      afterNoColonOfs = strOfs + BS.length noColon
+  if bs `BSU.unsafeIndex` afterNoColonOfs /= colonChar
+  then (noColon, afterNoColonOfs)
+  else do
+    let
+      afterColon = BS.takeWhile (not . isAfterTag) $ BS.drop (afterNoColonOfs + 1) bs
+    (afterColon, afterNoColonOfs + 1 + BS.length afterColon)
  
-        outCodeLine' [qc|getAttrName :: Int -> XMLString|]
-        outCodeLine' [qc|getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs|]
-        outCodeLine' [qc|inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' True tag arrOfs strOfs inParser|]
-        outCodeLine' [qc|inOneTagWithAttrs attrAlloc attrRouting tag arrOfs strOfs inParser =|]
-        outCodeLine' [qc|  toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser|]
-        outCodeLine' [qc|inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    let tagStrOfs = skipToOpenTag strOfs + 1|]
-        outCodeLine' [qc|    q <- parseTagWithAttrs attrAlloc attrRouting tag arrOfs tagStrOfs|]
-        outCodeLine' [qc|    case q of|]
-        outCodeLine' [qc|        Nothing -> do|]
-        outCodeLine' [qc|            updateFarthest tag tagStrOfs|]
-        outCodeLine' [qc|            return Nothing|]
-        outCodeLine' [qc|        Just ((ofs', arrOfs'), True) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs' (ofs' - 1)|]
-        outCodeLine' [qc|            return $ Just (arrOfs, ofs')|]
-        outCodeLine' [qc|        Just ((ofs', arrOfs'), False) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs' ofs'|]
-        outCodeLine' [qc|            let ofs'' = skipToOpenTag strOfs|]
-        outCodeLine' [qc|            if bs `BSU.unsafeIndex` (ofs'' + 1) == slashChar then do|]
-        outCodeLine' [qc|                case ensureTag False tag (ofs'' + 2) of|]
-        outCodeLine' [qc|                    Nothing     -> do|]
-        outCodeLine' [qc|                        updateFarthest tag tagStrOfs|]
-        outCodeLine' [qc|                        return Nothing|]
-        outCodeLine' [qc|                    Just (ofs''', _) -> return $ Just (arrOfs, ofs''')|]
-        outCodeLine' [qc|            else do|]
-        outCodeLine' [qc|                return Nothing|]
+getAttrName :: Int -> XMLString
+getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs
+inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' True tag arrOfs strOfs inParser
+inOneTagWithAttrs attrAlloc attrRouting tag arrOfs strOfs inParser =
+  toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser
+inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
+    let tagStrOfs = skipToOpenTag strOfs + 1
+    q <- parseTagWithAttrs attrAlloc attrRouting tag arrOfs tagStrOfs
+    case q of
+        Nothing -> do
+            updateFarthest tag tagStrOfs
+            return Nothing
+        Just ((ofs', arrOfs'), True) -> do
+            (arrOfs, strOfs) <- inParser arrOfs' (ofs' - 1)
+            return $ Just (arrOfs, ofs')
+        Just ((ofs', arrOfs'), False) -> do
+            (arrOfs, strOfs) <- inParser arrOfs' ofs'
+            let ofs'' = skipToOpenTag strOfs
+            if bs `BSU.unsafeIndex` (ofs'' + 1) == slashChar then do
+                case ensureTag False tag (ofs'' + 2) of
+                    Nothing     -> do
+                        updateFarthest tag tagStrOfs
+                        return Nothing
+                    Just (ofs''', _) -> return $ Just (arrOfs, ofs''')
+            else do
+                return Nothing
         -- FIXME: поддержка пустых типов данных
         -- https://stackoverflow.com/questions/7231902/self-closing-tags-in-xml-files
-        outCodeLine' [qc|inOneTag' hasAttrs tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    let tagOfs = skipToOpenTag strOfs + 1|]
-        outCodeLine' [qc|    case ensureTag hasAttrs tag tagOfs of|]
-        outCodeLine' [qc|        Nothing -> do|]
-        outCodeLine' [qc|            updateFarthest tag tagOfs|]
-        outCodeLine' [qc|            return Nothing|]
-        outCodeLine' [qc|        Just (ofs', True) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs (ofs' - 1)|] -- TODO points to special unparseable place
-        outCodeLine' [qc|            return $ Just (arrOfs, ofs')|]
-        outCodeLine' [qc|        Just (ofs', _) -> do|]
-        outCodeLine' [qc|            (arrOfs, strOfs) <- inParser arrOfs ofs'|]
-        outCodeLine' [qc|            let ofs'' = skipToOpenTag strOfs|]
-        outCodeLine' [qc|            if bs `{bsIndex}` (ofs'' + 1) == slashChar then do|]
-        outCodeLine' [qc|                case ensureTag False tag (ofs'' + 2) of|]
-        outCodeLine' [qc|                    Nothing     -> do|]
-        outCodeLine' [qc|                        updateFarthest tag tagOfs|]
-        outCodeLine' [qc|                        return Nothing|]
-        outCodeLine' [qc|                    Just (ofs''', _) -> return $ Just (arrOfs, ofs''')|]
-        outCodeLine' [qc|            else do|]
-        outCodeLine' [qc|                return Nothing|]
+inOneTag' hasAttrs tag arrOfs strOfs inParser = do
+    let tagOfs = skipToOpenTag strOfs + 1
+    case ensureTag hasAttrs tag tagOfs of
+        Nothing -> do
+            updateFarthest tag tagOfs
+            return Nothing
+        Just (ofs', True) -> do
+            (arrOfs, strOfs) <- inParser arrOfs (ofs' - 1) -- TODO points to special unparseable place
+            return $ Just (arrOfs, ofs')
+        Just (ofs', _) -> do
+            (arrOfs, strOfs) <- inParser arrOfs ofs'
+            let ofs'' = skipToOpenTag strOfs
+            if bs `#{bsIndex}` (ofs'' + 1) == slashChar then do
+                case ensureTag False tag (ofs'' + 2) of
+                    Nothing     -> do
+                        updateFarthest tag tagOfs
+                        return Nothing
+                    Just (ofs''', _) -> return $ Just (arrOfs, ofs''')
+            else do
+                return Nothing
         -- ~~~~~~~~
-        outCodeLine' [qc|inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser|]
-        outCodeLine' [qc|inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs strOfs inParser|]
-        outCodeLine' [qc|inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    V.unsafeWrite vec arrOfs 1|]
-        outCodeLine' [qc|    inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs + 1) strOfs inParser >>= \case|]
-        outCodeLine' [qc|        Just res -> return res|]
-        outCodeLine' [qc|        Nothing -> do|]
-        outCodeLine' [qc|            updateFarthest tag strOfs|]
-        outCodeLine' [qc|            {vecWrite} vec arrOfs 0|]
-        outCodeLine' [qc|            return (arrOfs + 1, strOfs)|]
-        outCodeLine' [qc|inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    V.unsafeWrite vec arrOfs 1|]
-        outCodeLine' [qc|    inOneTag' hasAttrs tag (arrOfs + 1) strOfs inParser >>= \case|]
-        outCodeLine' [qc|        Just res -> return res|]
-        outCodeLine' [qc|        Nothing -> do|]
-        outCodeLine' [qc|            updateFarthest tag strOfs|]
-        outCodeLine' [qc|            {vecWrite} vec arrOfs 0|]
-        outCodeLine' [qc|            return (arrOfs + 1, strOfs)|]
-        outCodeLine' [qc|inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser|]
-        outCodeLine' [qc|inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser|]
-        --outCodeLine' [qc|inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)|]
-        outCodeLine' [qc|inManyTags' hasAttrs tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \next (cnt, arrOfs', strOfs') ->|]
-        outCodeLine' [qc|        inOneTag' hasAttrs tag arrOfs' strOfs' inParser >>= \case|]
-        outCodeLine' [qc|            Just (arrOfs'', strOfs'') -> next   (cnt + 1, arrOfs'', strOfs'')|]
-        outCodeLine' [qc|            Nothing                   -> do|]
-        outCodeLine' [qc|                updateFarthest tag strOfs|]
-        outCodeLine' [qc|                return (cnt,     arrOfs', strOfs')|]
-        outCodeLine' [qc|    {vecWrite} vec arrOfs cnt|]
-        outCodeLine' [qc|    return (endArrOfs, endStrOfs)|]
-        outCodeLine' [qc|inManyTagsWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do|]
-        outCodeLine' [qc|    (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \next (cnt, arrOfs', strOfs') ->|]
-        outCodeLine' [qc|        inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \case|]
-        outCodeLine' [qc|            Just (arrOfs'', strOfs'') -> next   (cnt + 1, arrOfs'', strOfs'')|]
-        outCodeLine' [qc|            Nothing                   -> do|]
-        outCodeLine' [qc|                updateFarthest tag strOfs|]
-        outCodeLine' [qc|                return (cnt,     arrOfs', strOfs')|]
-        outCodeLine' [qc|    {vecWrite} vec arrOfs cnt|]
-        outCodeLine' [qc|    return (endArrOfs, endStrOfs)|]
-        outCodeLine' [qc|ensureTag True expectedTag ofs|]
-        outCodeLine' [qc|  | expectedTag == actualTagName =|]
-        outCodeLine' [qc|      if bs `{bsIndex}` ofsToEnd == closeTagChar|]
-        outCodeLine' [qc|        then Just (ofsToEnd + 1, False)|]
-        outCodeLine' [qc|      else|]
-        outCodeLine' [qc|        let ofs' = skipToCloseTag (ofs + BS.length expectedTag)|]
-        outCodeLine' [qc|         in Just (ofs' + 1, bs `{bsIndex}` (ofs' - 1) == slashChar)|]
-        outCodeLine' [qc|  | otherwise = Nothing|]
-        outCodeLine' [qc|  where (actualTagName, ofsToEnd) = getTagName' ofs|]
-        outCodeLine' [qc|ensureTag False expectedTag ofs|]
-        outCodeLine' [qc|  | expectedTag == actualTagName|]
-        outCodeLine' [qc|        = Just (ofsToEnd + 1, False)|]
-        outCodeLine' [qc|  | otherwise|]
-        outCodeLine' [qc|        = Nothing|]
-        outCodeLine' [qc|  where (actualTagName, ofsToEnd) = getTagName' ofs|]
-        outCodeLine' [qc|parseAttributes attrRouting strOfs arrOfs = do|]
-        outCodeLine' [qc|  let ofs1 = skipSpaces strOfs|]
-        outCodeLine' [qc|      curCh = bs `BSU.unsafeIndex` ofs1 |]
-        outCodeLine' [qc|  if curCh == slashChar || curCh == closeTagChar|]
-        outCodeLine' [qc|    then pure ofs1|]
-        outCodeLine' [qc|    else do|]
-        outCodeLine' [qc|    let|]
-        outCodeLine' [qc|      attrName = getAttrName ofs1|]
-        outCodeLine' [qc|      ofsAttrContent = ofs1 + BS.length attrName + 2|]
-        outCodeLine' [qc|    attrContentEnd <- parseAttrContent (attrRouting arrOfs attrName) ofsAttrContent|]
-        outCodeLine' [qc|    parseAttributes attrRouting (attrContentEnd + 1) arrOfs|]
-        outCodeLine' [qc|parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs|]
-        outCodeLine' [qc|  | expectedTag == actualTagName = do|]
-        outCodeLine' [qc|      arrOfsAfterAttrs <- attrAlloc arrOfs|]
-        outCodeLine' [qc|      if bs `BSU.unsafeIndex` ofsToEnd == closeTagChar|]
-        outCodeLine' [qc|        then pure $ Just ((ofsToEnd + 1, arrOfsAfterAttrs), False)|]
-        outCodeLine' [qc|      else do|]
-        outCodeLine' [qc|        _failOfs <- STRef.readSTRef farthest|]
-        outCodeLine' [qc|        strOfsAfterAttrs <- parseAttributes attrRouting ofsToEnd arrOfs|]
-        outCodeLine' [qc|        let ofs' = skipToCloseTag strOfsAfterAttrs|]
-        outCodeLine' [qc|        pure $ Just ((ofs' + 1, arrOfsAfterAttrs), bs `BSU.unsafeIndex` (ofs' - 1) == slashChar)|]
-        outCodeLine' [qc|  | otherwise = pure Nothing|]
-        outCodeLine' [qc|  where (actualTagName, ofsToEnd) = getTagName' ofs|]
+inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser
+inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs strOfs inParser
+inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
+    V.unsafeWrite vec arrOfs 1
+    inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs + 1) strOfs inParser >>= \\case
+        Just res -> return res
+        Nothing -> do
+            updateFarthest tag strOfs
+            #{vecWrite} vec arrOfs 0
+            return (arrOfs + 1, strOfs)
+inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do
+    V.unsafeWrite vec arrOfs 1
+    inOneTag' hasAttrs tag (arrOfs + 1) strOfs inParser >>= \\case
+        Just res -> return res
+        Nothing -> do
+            updateFarthest tag strOfs
+            #{vecWrite} vec arrOfs 0
+            return (arrOfs + 1, strOfs)
+inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser
+inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser
+-- inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)
+inManyTags' hasAttrs tag arrOfs strOfs inParser = do
+    (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \\next (cnt, arrOfs', strOfs') ->
+        inOneTag' hasAttrs tag arrOfs' strOfs' inParser >>= \\case
+            Just (arrOfs'', strOfs'') -> next   (cnt + 1, arrOfs'', strOfs'')
+            Nothing                   -> do
+                updateFarthest tag strOfs
+                return (cnt,     arrOfs', strOfs')
+    #{vecWrite} vec arrOfs cnt
+    return (endArrOfs, endStrOfs)
+inManyTagsWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
+    (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \\next (cnt, arrOfs', strOfs') ->
+        inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \\case
+            Just (arrOfs'', strOfs'') -> next   (cnt + 1, arrOfs'', strOfs'')
+            Nothing                   -> do
+                updateFarthest tag strOfs
+                return (cnt,     arrOfs', strOfs')
+    #{vecWrite} vec arrOfs cnt
+    return (endArrOfs, endStrOfs)
+ensureTag True expectedTag ofs
+  | expectedTag == actualTagName =
+      if bs `#{bsIndex}` ofsToEnd == closeTagChar
+        then Just (ofsToEnd + 1, False)
+      else
+        let ofs' = skipToCloseTag (ofs + BS.length expectedTag)
+         in Just (ofs' + 1, bs `#{bsIndex}` (ofs' - 1) == slashChar)
+  | otherwise = Nothing
+  where (actualTagName, ofsToEnd) = getTagName' ofs
+ensureTag False expectedTag ofs
+  | expectedTag == actualTagName
+        = Just (ofsToEnd + 1, False)
+  | otherwise
+        = Nothing
+  where (actualTagName, ofsToEnd) = getTagName' ofs
+parseAttributes attrRouting strOfs arrOfs = do
+  let ofs1 = skipSpaces strOfs
+      curCh = bs `BSU.unsafeIndex` ofs1 
+  if curCh == slashChar || curCh == closeTagChar
+    then pure ofs1
+    else do
+    let
+      attrName = getAttrName ofs1
+      ofsAttrContent = ofs1 + BS.length attrName + 2
+    attrContentEnd <- parseAttrContent (attrRouting arrOfs attrName) ofsAttrContent
+    parseAttributes attrRouting (attrContentEnd + 1) arrOfs
+parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs
+  | expectedTag == actualTagName = do
+      arrOfsAfterAttrs <- attrAlloc arrOfs
+      if bs `BSU.unsafeIndex` ofsToEnd == closeTagChar
+        then pure $ Just ((ofsToEnd + 1, arrOfsAfterAttrs), False)
+      else do
+        _failOfs <- STRef.readSTRef farthest
+        strOfsAfterAttrs <- parseAttributes attrRouting ofsToEnd arrOfs
+        let ofs' = skipToCloseTag strOfsAfterAttrs
+        pure $ Just ((ofs' + 1, arrOfsAfterAttrs), bs `BSU.unsafeIndex` (ofs' - 1) == slashChar)
+  | otherwise = pure Nothing
+  where (actualTagName, ofsToEnd) = getTagName' ofs
 
 
-        outCodeLine' [qc|failExp _expStr _ofs = do|]
-        outCodeLine' [qc|  failOfs <- STRef.readSTRef farthest|]
-        outCodeLine' [qc|  failTag <- STRef.readSTRef farthestTag|]
-        outCodeLine' [qc|  let failActual = substr bs failOfs (BS.length failTag + 10)|]
-        outCodeLine' [qc|  parseError failOfs bs (BSC.unpack $ "Expected tag '" <> failTag <> "', but got '" <> failActual <> "'")|]
-        outCodeLine' [qc|updateFarthest tag tagOfs = do|]
-        outCodeLine' [qc|  f <- STRef.readSTRef farthest|]
-        outCodeLine' [qc|  when (tagOfs > f) $ do|]
-        outCodeLine' [qc|    STRef.writeSTRef farthest    tagOfs|]
-        outCodeLine' [qc|    STRef.writeSTRef farthestTag tag|]
-        outCodeLine' [qc|substr :: ByteString -> Int -> Int -> ByteString|]
-        outCodeLine' [qc|substr bs ofs len = BS.take len $ BS.drop ofs bs -- TODO replace with UNSAFE?|]
-        outCodeLine' [qc|--|]
-        --outCodeLine' [qc|parseString :: Int -> Int -> ST s (Int, Int)|]
-        outCodeLine' [qc|parseXMLStringContent = parseString|]
-        outCodeLine' [qc|parseAttrContent arrAttrLocation strStart = do|]
-        outCodeLine' [qc|  let strEnd = skipTo dquoteChar strStart|]
-        outCodeLine' [qc|  when (arrAttrLocation >= 0) do|]
-        outCodeLine' [qc|    V.unsafeWrite vec arrAttrLocation     strStart|]
-        outCodeLine' [qc|    V.unsafeWrite vec (arrAttrLocation+1) (strEnd - strStart)|]
-        outCodeLine' [qc|  return strEnd|]
+failExp _expStr _ofs = do
+  failOfs <- STRef.readSTRef farthest
+  failTag <- STRef.readSTRef farthestTag
+  let failActual = substr bs failOfs (BS.length failTag + 10)
+  parseError failOfs bs (BSC.unpack $ "Expected tag '" <> failTag <> "', but got '" <> failActual <> "'")
+updateFarthest tag tagOfs = do
+  f <- STRef.readSTRef farthest
+  when (tagOfs > f) $ do
+    STRef.writeSTRef farthest    tagOfs
+    STRef.writeSTRef farthestTag tag
+substr :: ByteString -> Int -> Int -> ByteString
+substr bs ofs len = BS.take len $ BS.drop ofs bs -- TODO replace with UNSAFE?
+-- parseString :: Int -> Int -> ST s (Int, Int)
+parseXMLStringContent = parseString
+parseAttrContent arrAttrLocation strStart = do
+  let strEnd = skipTo dquoteChar strStart
+  when (arrAttrLocation >= 0) do
+    V.unsafeWrite vec arrAttrLocation     strStart
+    V.unsafeWrite vec (arrAttrLocation+1) (strEnd - strStart)
+  return strEnd
 
-        outCodeLine' [qc|parseString arrStart strStart = do|]
-        outCodeLine' [qc|  let strEnd = skipToOpenTag strStart|]
-        outCodeLine' [qc|  {vecWrite} vec arrStart     strStart|]
-        outCodeLine' [qc|  {vecWrite} vec (arrStart+1) (strEnd - strStart)|]
-        outCodeLine' [qc|  return (arrStart+2, strEnd)|]
-        outCodeLine' [qc|parseScientificContent = parseString|]
-        outCodeLine' [qc|parseDateTimeContent = parseString|]
-        outCodeLine' [qc|parseDurationContent = parseString|]
-        outCodeLine' [qc|parseGYearMonthContent = parseString|]
-        outCodeLine' [qc|parseGYearContent = parseString|]
-        outCodeLine' [qc|parseBoolContent = parseString|]
-        outCodeLine' [qc|parseDoubleContent = parseString|]
-        outCodeLine' [qc|parseFloatContent = parseString|]
-        outCodeLine' [qc|parseGMonthContent = parseString|]
-        outCodeLine' [qc|parseIntegerContent = parseString|]
-        outCodeLine' [qc|parseIntContent = parseString|]
-        -- outCodeLine' [qc|parseUnitContent arrStart strStart = pure (arrStart, strStart)|]
-        outCodeLine' [qc|parseUnitContent arrStart strStart =|]
-        outCodeLine' [qc|  pure $ (arrStart,) $ parseUnitContentRec (0 :: Int) strStart|]
-        outCodeLine' [qc|parseUnitContentRec level strStart = do|]
-        outCodeLine' [qc|  let echoNbefore msg n = (msg <> ": " <> show (BS.takeEnd 10 $ BS.take n bs)) `trace` n|]
-        outCodeLine' [qc|  let echoWord8 msg x = (msg <> ": " <> show (Data.Char.chr $ fromIntegral x)) `trace` x|]
-        outCodeLine' [qc|  let startTagIdx = echo "startTagIdx" $ skipToOpenTag strStart|]
-        outCodeLine' [qc|      endTagIdx = echo "endTagIdx" $ skipToCloseTag startTagIdx|]
-        outCodeLine' [qc|  if startTagIdx `seq` endTagIdx `seq` (echo "isSlash" (echoWord8 "start+1" (bs `BSU.unsafeIndex` (startTagIdx+1)) == slashChar))|]
-        outCodeLine' [qc|    then|]
-        outCodeLine' [qc|      -- it's closing tag|]
-        outCodeLine' [qc|      (if level == 0 then startTagIdx else parseUnitContentRec (level - 1) endTagIdx)|]
-        outCodeLine' [qc|    else if bs `BSU.unsafeIndex` (endTagIdx - 1) == slashChar|]
-        outCodeLine' [qc|      -- empty tag, parsing further on the same level|]
-        outCodeLine' [qc|      then parseUnitContentRec level endTagIdx|]
-        outCodeLine' [qc|      -- open tag, one level deeper|]
-        outCodeLine' [qc|      else parseUnitContentRec (level+1) endTagIdx|]
+parseString arrStart strStart = do
+  let strEnd = skipToOpenTag strStart
+  #{vecWrite} vec arrStart     strStart
+  #{vecWrite} vec (arrStart+1) (strEnd - strStart)
+  return (arrStart+2, strEnd)
+parseScientificContent = parseString
+parseDateTimeContent = parseString
+parseDurationContent = parseString
+parseGYearMonthContent = parseString
+parseGYearContent = parseString
+parseBoolContent = parseString
+parseDoubleContent = parseString
+parseFloatContent = parseString
+parseGMonthContent = parseString
+parseIntegerContent = parseString
+parseIntContent = parseString
+parseInt64Content = parseString
+parseDayContent = parseString
+parseTimeOfDayContent = parseString
+parseXDateTimeContent = parseString
+parseXTimeContent = parseString
+parseBooleanContent = parseString
 
-        outCodeLine' [qc|parseInt64Content = parseString|]
-        outCodeLine' [qc|parseDayContent = parseString|]
-        outCodeLine' [qc|parseTimeOfDayContent = parseString|]
-        outCodeLine' [qc|parseXDateTimeContent = parseString|]
-        outCodeLine' [qc|parseXTimeContent = parseString|]
-        outCodeLine' [qc|parseBooleanContent = parseString|]
-        outCodeLine' [qc|skipSpaces ofs|]
-        outCodeLine' [qc|  | isSpaceChar (bs `{bsIndex}` ofs) = skipSpaces (ofs + 1)|]
-        outCodeLine' [qc|  | otherwise = ofs|]
-        outCodeLine' [qc|isSpaceChar :: Word8 -> Bool|]
-        outCodeLine' [qc|isSpaceChar c = c == 32 || c == 10 || c == 9 || c == 13|]
-        outCodeLine' [qc|skipHeader :: Int -> Int|]
-        outCodeLine' [qc|skipHeader ofs|]
-        outCodeLine' [qc|  | bs `{bsIndex}` ofs == openTagChar && bs `{bsIndex}` (ofs + 1) == questionChar = skipToCloseTag (ofs + 2) + 1|]
-        outCodeLine' [qc|  | otherwise = ofs|]
-        outCodeLine' [qc|eqChar       = 61 -- '='|]
-        outCodeLine' [qc|dquoteChar   = 34 -- '"'|]
-        outCodeLine' [qc|slashChar    = 47 -- '<'|]
-        outCodeLine' [qc|openTagChar  = 60 -- '<'|]
-        outCodeLine' [qc|closeTagChar = 62 -- '>'|]
-        outCodeLine' [qc|questionChar = 63 -- '?'|]
-        outCodeLine' [qc|colonChar = 58 -- '?'|]
-        outCodeLine' [qc|skipToCloseTag :: Int -> Int|]
-        outCodeLine' [qc|skipToCloseTag ofs|]
-        outCodeLine' [qc|  | bs `{bsIndex}` ofs == closeTagChar = ofs|]
-        outCodeLine' [qc|  | otherwise = skipToCloseTag (ofs + 1)|]
-        outCodeLine' [qc|skipToOpenTag :: Int -> Int|]
-        outCodeLine' [qc|skipToOpenTag ofs|] -- TODO with `takeWhile`
-        outCodeLine' [qc|  | bs `{bsIndex}` ofs == openTagChar = ofs|]
-        outCodeLine' [qc|  | otherwise = skipToOpenTag (ofs + 1)|]
-        outCodeLine' [qc|skipTo :: Word8 -> Int -> Int|]
-        outCodeLine' [qc|skipTo c ofs|]
-        outCodeLine' [qc|  | bs `BSU.unsafeIndex` ofs == c = ofs|]
-        outCodeLine' [qc|  | otherwise = skipTo c (ofs + 1)|]
+parseUnitContent arrStart strStart =
+  pure $ (arrStart,) $ parseUnitContentRec (0 :: Int) strStart
+parseUnitContentRec level strStart = do
+  let echoNbefore msg n = (msg <> ": " <> show (BS.takeEnd 10 $ BS.take n bs)) `trace` n
+  let echoWord8 msg x = (msg <> ": " <> show (Data.Char.chr $ fromIntegral x)) `trace` x
+  let startTagIdx = echo "startTagIdx" $ skipToOpenTag strStart
+      endTagIdx = echo "endTagIdx" $ skipToCloseTag startTagIdx
+  if startTagIdx `seq` endTagIdx `seq` (echo "isSlash" (echoWord8 "start+1" (bs `BSU.unsafeIndex` (startTagIdx+1)) == slashChar))
+    then
+      -- it's closing tag
+      (if level == 0 then startTagIdx else parseUnitContentRec (level - 1) endTagIdx)
+    else if bs `BSU.unsafeIndex` (endTagIdx - 1) == slashChar
+      -- empty tag, parsing further on the same level
+      then parseUnitContentRec level endTagIdx
+      -- open tag, one level deeper
+      else parseUnitContentRec (level+1) endTagIdx
+
+skipSpaces ofs
+  | isSpaceChar (bs `#{bsIndex}` ofs) = skipSpaces (ofs + 1)
+  | otherwise = ofs
+isSpaceChar :: Word8 -> Bool
+isSpaceChar c = c == 32 || c == 10 || c == 9 || c == 13
+skipHeader :: Int -> Int
+skipHeader ofs
+  | bs `#{bsIndex}` ofs == openTagChar && bs `#{bsIndex}` (ofs + 1) == questionChar = skipToCloseTag (ofs + 2) + 1
+  | otherwise = ofs
+eqChar       = 61 -- '='
+dquoteChar   = 34 -- '"'
+slashChar    = 47 -- '<'
+openTagChar  = 60 -- '<'
+closeTagChar = 62 -- '>'
+questionChar = 63 -- '?'
+colonChar = 58 -- '?'
+skipToCloseTag :: Int -> Int
+skipToCloseTag ofs
+  | bs `#{bsIndex}` ofs == closeTagChar = ofs
+  | otherwise = skipToCloseTag (ofs + 1)
+skipToOpenTag :: Int -> Int
+skipToOpenTag ofs -- TODO with `takeWhile`
+  | bs `#{bsIndex}` ofs == openTagChar = ofs
+  | otherwise = skipToOpenTag (ofs + 1)
+skipTo :: Word8 -> Int -> Int
+skipTo c ofs
+  | bs `BSU.unsafeIndex` ofs == c = ofs
+  | otherwise = skipTo c (ofs + 1)
+  |]
 
 generateParserExtractTopLevel1 ::
   HasCallStack =>
