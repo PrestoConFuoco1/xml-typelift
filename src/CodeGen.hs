@@ -58,7 +58,6 @@ import Data.Bifunctor (Bifunctor(..))
 import Data.Char (isDigit, isUpper, toLower)
 import Data.Generics.Labels
 import Text.Interpolation.Nyan
-import GHC.Weak (runFinalizerBatch)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -525,7 +524,7 @@ extractDateTimeContent = extractAndParse zonedTimeStr
 |]
         let
           typesUsingReadInstance = 
-            ["Day", "Integer", "Int", "Int64"] :: [String]
+            ["Integer", "Int", "Int64"] :: [String]
           typesUsingCustomShortParsers :: [(String, String)] =
             [ ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
             , ("Duration", "parseDuration")
@@ -534,7 +533,7 @@ extractDateTimeContent = extractAndParse zonedTimeStr
             , ("GYear", "parseIntegerRaw")
             ]
           typesUsingCustomParsers =
-            ["Scientific", "ZonedTime", "Bool", "GYearMonth", "GMonth"]
+            ["Scientific", "ZonedTime", "Bool", "GYearMonth", "GMonth", "Day"]
           mkParseRawTypeSig :: String -> String
           mkParseRawTypeSig t = [int||parse#{t}Raw :: ByteString -> Either String #{t}|]
           readInstanceParseRawBody :: String -> String
@@ -608,13 +607,21 @@ parseGMonthRaw bsInp = runFlatparser bsInp do
   month <- FP.anyAsciiDecimalInt
   pure month
 
-parseZonedTimeRaw :: ByteString -> Either String ZonedTime
-parseZonedTimeRaw bsInp = runFlatparser bsInp do
+parseDayRaw :: ByteString -> Either String Day
+parseDayRaw bsInp = runFlatparser bsInp parseDayFlat
+
+parseDayFlat :: FP.Parser String Day
+parseDayFlat = do
   year <- FP.anyAsciiDecimalInteger
   fpSkipAsciiChar '-'
   month <- FP.anyAsciiDecimalInt
   fpSkipAsciiChar '-'
   day <- FP.anyAsciiDecimalInt
+  pure $ fromGregorian year month day
+
+parseZonedTimeRaw :: ByteString -> Either String ZonedTime
+parseZonedTimeRaw bsInp = runFlatparser bsInp do
+  day <- parseDayFlat
   fpSkipAsciiChar 'T'
   hours <- FP.anyAsciiDecimalInt
   fpSkipAsciiChar ':'
@@ -647,7 +654,7 @@ parseZonedTimeRaw bsInp = runFlatparser bsInp do
   FP.skipMany $ FP.skipSatisfyAscii Data.Char.isSpace
   pure ZonedTime
     { zonedTimeToLocalTime = LocalTime
-      { localDay = fromGregorian year month day
+      { localDay = day
       , localTimeOfDay = TimeOfDay hours minutes seconds
       }
     , zonedTimeZone = tz
