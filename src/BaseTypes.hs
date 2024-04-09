@@ -141,6 +141,8 @@ gMonth - can't be parsed using standard ParseTime typeclass, added small parser
 date - can use Read instance, but it doesn't handle timezones
 time - 09:30:10.5 is parsed, but 09:30:10.5 is not i.e. second fractions are not supported
 dateTime - parses everything except the Z timezone
+
+
 -}
 
 -- | Check if builder makes Haskell base type

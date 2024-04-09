@@ -58,6 +58,7 @@ import Data.Bifunctor (Bifunctor(..))
 import Data.Char (isDigit, isUpper, toLower)
 import Data.Generics.Labels
 import Text.Interpolation.Nyan
+import GHC.Weak (runFinalizerBatch)
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -524,16 +525,16 @@ extractDateTimeContent = extractAndParse zonedTimeStr
 |]
         let
           typesUsingReadInstance = 
-            ["Day", "GYear", "Integer", "Int", "Int64"] :: [String]
+            ["Day", "Integer", "Int", "Int64"] :: [String]
           typesUsingCustomShortParsers :: [(String, String)] =
-            [ ("GYearMonth", "(readStringMaybe $ parseTimeM True defaultTimeLocale \"%Y-%-m\")")
-            , ("GMonth", "(readStringMaybe parseGMonth)")
-            , ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
+            [ ("TimeOfDay", "(readStringMaybe iso8601ParseM)")
             , ("Duration", "parseDuration")
             , ("Double", "(fmap realToFrac . parseScientificRaw)")
             , ("Float", "(fmap realToFrac . parseScientificRaw)")
+            , ("GYear", "parseIntegerRaw")
             ]
-          typesUsingCustomParsers = ["Scientific", "ZonedTime", "Bool"]
+          typesUsingCustomParsers =
+            ["Scientific", "ZonedTime", "Bool", "GYearMonth", "GMonth"]
           mkParseRawTypeSig :: String -> String
           mkParseRawTypeSig t = [int||parse#{t}Raw :: ByteString -> Either String #{t}|]
           readInstanceParseRawBody :: String -> String
@@ -553,13 +554,6 @@ extractDateTimeContent = extractAndParse zonedTimeStr
         outCodeMultiLines [int|D|
 parseXMLStringRaw :: ByteString -> Either String ByteString
 parseXMLStringRaw = pure
-{-
-parseZonedTimeRaw = readStringMaybe $ \\x ->
-  asum
-    [ parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q%EZ" x
-    , parseTimeM True defaultTimeLocale "%Y-%-m-%-dT%H:%M:%S%Q" x
-    ]
--}
 parseBoolRaw = \\case
     "true" -> Right True
     "1" -> Right True
@@ -588,11 +582,6 @@ snd3 (_, y, _) = y
 thrd3 (_, _, z) = z
 dayYear = fst3 . toGregorian
 dayMonthOfYear = snd3 . toGregorian
-parseGMonth str =
-  let stripped = dropWhile Data.Char.isSpace str in
-  if "--" `isPrefixOf` stripped
-  then fmap dayMonthOfYear $ parseTimeM True defaultTimeLocale "%-m" $ drop 2 stripped
-  else Nothing
 
 runFlatparser :: ByteString -> FP.Parser String a -> Either String a
 runFlatparser bsInp parser = fromFlatparseResult $ FP.runParser parser bsInp 
@@ -604,6 +593,20 @@ fromFlatparseResult = \\case
   FP.Fail -> Left "failed"
   FP.Err e -> Left e
 fpSkipAsciiChar c = FP.skipSatisfyAscii (== c)
+
+parseGYearMonthRaw :: ByteString -> Either String GYearMonth
+parseGYearMonthRaw bsInp = runFlatparser bsInp do
+  year <- FP.anyAsciiDecimalInteger
+  fpSkipAsciiChar '-'
+  month <- FP.anyAsciiDecimalInt
+  pure $ YearMonth year month
+
+parseGMonthRaw :: ByteString -> Either String GMonth
+parseGMonthRaw bsInp = runFlatparser bsInp do
+  fpSkipAsciiChar '-'
+  fpSkipAsciiChar '-'
+  month <- FP.anyAsciiDecimalInt
+  pure month
 
 parseZonedTimeRaw :: ByteString -> Either String ZonedTime
 parseZonedTimeRaw bsInp = runFlatparser bsInp do
