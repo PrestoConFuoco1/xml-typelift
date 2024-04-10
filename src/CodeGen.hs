@@ -128,8 +128,15 @@ codegen :: GenerateOpts -> Schema -> IO String
 codegen c sch =
   codegen' c sch $ generateParser2 False c sch
 
+withFourmoluDisable :: CG a -> CG a
+withFourmoluDisable action = do
+  outCodeLine' "{- FOURMOLU DISABLE -}"
+  res <- action
+  outCodeLine' "{- FOURMOLU ENABLE -}"
+  pure res
+
 generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
-generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} schema = do
+generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} schema = withFourmoluDisable do
     generateModuleHeading opts
     schemaTypesMap .= Map.fromList (map (first mkXmlNameWN) $ Map.toList schema.typesExtended)
     --processSchemaNamedTypes schema.types
@@ -182,14 +189,13 @@ generateParserInternalStructures = do
     outCodeLine ""
 
 eltToRepeatedness :: Element -> Repeatedness
-eltToRepeatedness (Element 0 Unbounded     _ _ _) = RepMany
-eltToRepeatedness (Element 0 (MaxOccurs 1) _ _ _) = RepMaybe
-eltToRepeatedness (Element 0 _             _ _ _) = RepMany
-eltToRepeatedness (Element 1 (MaxOccurs 1) _ _ _) = RepOnce
-eltToRepeatedness (Element 1 _             _ _ _) = RepMany
-eltToRepeatedness (Element m Unbounded     _ _ _) = RepNotLess m
-eltToRepeatedness (Element m (MaxOccurs n) _ _ _) = RepRange m n
-
+eltToRepeatedness (Element 0 Unbounded     _ _ _ _) = RepMany
+eltToRepeatedness (Element 0 (MaxOccurs 1) _ _ _ _) = RepMaybe
+eltToRepeatedness (Element 0 _             _ _ _ _) = RepMany
+eltToRepeatedness (Element 1 (MaxOccurs 1) _ _ _ _) = RepOnce
+eltToRepeatedness (Element 1 _             _ _ _ _) = RepMany
+eltToRepeatedness (Element m Unbounded     _ _ _ _) = RepNotLess m
+eltToRepeatedness (Element m (MaxOccurs n) _ _ _ _) = RepRange m n
 
 generateParserInternalArray1 :: GenerateOpts -> (Element, TypeWithAttrs) -> CG ()
 generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
@@ -795,6 +801,29 @@ generateAuxiliaryFunctions = do
     outCodeLine' [qc|echoN :: Show a => String -> Int -> a -> a|]
     outCodeLine' [qc|echoN msg n x = (msg <> ": " <> take n (show x)) `trace` x|]
     outCodeLine' "{-# INLINE echoN #-}"
+    outCodeLine' ""
+    outCodeLine' "-- | Show error with context"
+    outCodeLine' [qc|parseError :: Int -> ByteString -> String -> a|]
+    outCodeLine' [qc|parseError ofs inputStr msg =|]
+    outCodeLine' [qc|    error $ msg <> "\nIn line " <> show lineCount <> " (offset " <> show ofs <> "):"|]
+    outCodeLine' [qc|         <> BSC.unpack inputStrPart <> "\n"|]
+    outCodeLine' [qc|         <> replicate errPtrStickLen '-' <> "^"|]
+    outCodeLine' [qc|  where|]
+    outCodeLine' [qc|    lineCount           = succ $ BS.count nextLineChar $ BS.take ofs inputStr|]
+    outCodeLine' [qc|    lastLineBeforeStart = maybe 0 id $ BS.elemIndexEnd nextLineChar $ til ofs|]
+    outCodeLine' [qc|    sndLastLineStart    = maybe 0 id $ BS.elemIndexEnd nextLineChar $ til lastLineBeforeStart|]
+    outCodeLine' [qc|    lastLineStart       = max 0 $ max (ofs - 120) sndLastLineStart|]
+    outCodeLine' [qc|    lastLineLen         = min 40 $ maybe 40 id $ BS.elemIndex nextLineChar (BS.drop ofs inputStr)|]
+    outCodeLine' [qc|    til len             = BS.take len inputStr|]
+    outCodeLine' [qc|    errPtrStickLen      = max 0 (ofs - lastLineBeforeStart - 1)|]
+    outCodeLine' [qc|    nextLineChar        = 10 -- '\n'|]
+    outCodeLine' [qc|    inputStrPart        = BS.take (ofs - lastLineStart + lastLineLen) $ BS.drop lastLineStart inputStr|]
+    outCodeLine' ""
+    outCodeLine' ""
+    outCodeLine' [qc|parseErrorBs :: ByteString -> String -> a|]
+    outCodeLine' [qc|parseErrorBs inputStr@(PS _ start _) msg =|]
+    outCodeLine' [qc|    parseError start inputStr msg|]
+    outCodeLine' ""
 
 generateParserTop :: CG ()
 generateParserTop = do
@@ -821,7 +850,7 @@ generateMainFunction GenerateOpts{..} = trace "main" do
                     withIndent $ do
                         outCodeLine' [qc|putStrLn filename|]
                         if isUnsafe then
-                            outCodeLine' [qc|pPrint result|]
+                            outCodeLine' [qc|print result|]
                         else
                             outCodeLine' [qc|print result|]
                     outCodeLine' [qc|else do|]
@@ -1748,6 +1777,7 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE RecordWildCards #-}"
     outCodeLine "{-# LANGUAGE ScopedTypeVariables #-}"
     outCodeLine "{-# LANGUAGE TupleSections #-}"
+    outCodeLine "{-# LANGUAGE TemplateHaskell #-}"
     outCodeLine "{-# LANGUAGE NumericUnderscores #-}"
     -- TODO also add in parser generator
     --

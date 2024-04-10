@@ -261,23 +261,24 @@ instance FromXML Element where
 
 eltAttrHandler :: AttrHandler Element
 eltAttrHandler elt attr@(aName, aVal) =
-  case stripNS aName of
-    "name"      -> return $ elt { eName =     aVal }
-    "type"      -> return $ elt { eType = Ref aVal }
-    "ref"       -> "Element references are not implemented yet" `failHere` aName
-    "minOccurs" ->
+  case splitNS aName of
+    (_, "name") -> return $ elt { eName =     aVal }
+    (_, "type") -> return $ elt { eType = Ref aVal }
+    (_, "ref" ) -> "Element references are not implemented yet" `failHere` aName
+    (_, "minOccurs") ->
       case BS.readInt aVal of
         Just  (r, "") -> return $ elt { minOccurs = r }
-        _             -> ("Attribute minOccurs should be integer, but is '" <> aVal <> "'")
+        _ -> ("Attribute minOccurs should be integer, but is '" <> aVal <> "'")
                              `failHere` aVal
-    "maxOccurs" -> 
+    (_, "maxOccurs") ->
        case readMaxOccurs aVal of
          Left  err -> Left     err
          Right r   -> return $ elt { maxOccurs = r }
-    _           -> unknownAttrHandler "element" attr
+    ("xmlns", qual1) -> return $ elt {elQuals = Map.insert (Qual qual1) (Namespace aVal) (elQuals elt)}
+    _ -> unknownAttrHandler "element" attr
 
 readMaxOccurs :: BS.ByteString -> Result MaxOccurs
-readMaxOccurs  "unbounded"                 = return $ Unbounded
+readMaxOccurs  "unbounded"                 = return Unbounded
 readMaxOccurs (BS.readInt -> Just (v, "")) = return $ MaxOccurs v
 readMaxOccurs  other                       = ("Cannot decode '" <> other <> "' as maxoccurs value")
                                                  `failHere` other

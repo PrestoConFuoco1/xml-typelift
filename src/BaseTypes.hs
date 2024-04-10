@@ -43,7 +43,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
                else "Data.Scientific.Safe (Scientific, scientific)"
               ,"Data.Time.ISO8601.Duration"
               -- ,"FromXML"
-              ,"Errors"
+              -- ,"Errors"
               ,"qualified Data.Char"
               ,"qualified FlatParse.Basic as FP"
               ,"Data.Time.Calendar(Day, Year, MonthOfYear, toGregorian, fromGregorian)"
@@ -57,6 +57,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
               ,"Control.Lens.TH"
               ,"qualified Data.STRef as STRef"
               ,"Data.ByteString (ByteString)"
+              ,"Data.ByteString.Internal (ByteString (..))"
               -- ,"Debug.Trace"
               -- ,"Data.Char"
               ,"Data.Functor.Identity"
@@ -88,11 +89,11 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
     additionalBytestringModules
       | isUnsafe  = ["qualified Data.ByteString.Unsafe as BSU"]
       | otherwise = []
-    xenoModules
-      | isUnsafe  = ["qualified Xeno.DOM as Xeno"]
-      | otherwise = ["qualified Xeno.DOM.Safe as Xeno"]
+    xenoModules = []
+      -- | isUnsafe  = ["qualified Xeno.DOM as Xeno"]
+      -- | otherwise = ["qualified Xeno.DOM.Safe as Xeno"]
     prettyPrintModules
-      | isUnsafe  = ["Text.Pretty.Simple"]
+      | isUnsafe  = [] -- "Text.Pretty.Simple"]
       | otherwise = []
     baseTypes =
       ["type XMLString = ByteString"
@@ -126,6 +127,9 @@ baseTranslations =
     ,("integer"        , "Integer"      ) -- or Integer
     ,("int"            , "Int"          ) -- or Integer
     ,("positiveInteger", "Integer"      ) -- or Integer
+    ,("nonNegativeInteger", "Integer")
+    ,("unsignedShort", "Int")
+    ,("unsignedByte", "Int")
     ,("float"          , "Float"        )
     ,("date"           , "Day"          )
     ,("time"           , "XTime"     )
