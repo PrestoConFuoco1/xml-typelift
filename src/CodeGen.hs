@@ -243,9 +243,10 @@ toError tag strOfs act = do
     act >>= \\case
         Nothing -> failExp ("<" <> tag) strOfs
         Just res -> return res
-{-# INLINE getTagName #-}
-getTagName :: Int -> XMLString
-getTagName strOfs = fst $ getTagName' $ skipToOpenTag strOfs + 1
+
+{-# INLINE isBeforeTag #-}
+isBeforeTag :: Word8 -> Bool
+isBeforeTag c = c == openTagChar || c == slashChar || c == colonChar
 
 {-# INLINE isAfterTag #-}
 isAfterTag :: Word8 -> Bool
@@ -255,21 +256,26 @@ isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar
 isQualDelim :: Word8 -> Bool
 isQualDelim c = c == colonChar
 
-{-# INLINE getTagName' #-}
-getTagName' :: Int -> (XMLString, Int)
-getTagName' strOfs = do
+{-# INLINE getTagName #-}
+getTagName :: Int -> XMLString
+getTagName ((+1) . skipToOpenTag -> strOfs) = do
   let noColon = BS.takeWhile (\\c -> not (isAfterTag c || isQualDelim c)) $ BS.drop strOfs bs
       afterNoColonOfs = strOfs + BS.length noColon
   if bs `BSU.unsafeIndex` afterNoColonOfs /= colonChar
-  then (noColon, afterNoColonOfs)
-  else do
-    let
-      afterColon = BS.takeWhile (not . isAfterTag) $ BS.drop (afterNoColonOfs + 1) bs
-    (afterColon, afterNoColonOfs + 1 + BS.length afterColon)
- 
+  then noColon
+  else BS.takeWhile (not . isAfterTag) $ BS.drop (afterNoColonOfs + 1) bs
+
+{-# INLINE getAfterTagOffset #-}
+getAfterTagOffset :: Int -> Int
+getAfterTagOffset strOfs =
+  if not (isAfterTag $ BSU.unsafeIndex bs strOfs)
+  then getAfterTagOffset (strOfs + 1)
+  else strOfs
+
 {-# INLINE getAttrName #-}
 getAttrName :: Int -> XMLString
 getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs
+
 {-# INLINE inOneTag #-}
 inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' True tag arrOfs strOfs inParser
 {-# INLINE inOneTagWithAttrs #-}
@@ -368,22 +374,30 @@ inManyTagsWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
                 return (cnt,     arrOfs', strOfs')
     #{vecWrite} vec arrOfs cnt
     return (endArrOfs, endStrOfs)
+
+{-# INLINE isGivenTagBeforeOffset #-}
+isGivenTagBeforeOffset expectedTag ofsToEnd =
+  expectedTag `BS.isSuffixOf` BS.take ofsToEnd bs
+    && isBeforeTag (BSU.unsafeIndex bs $ ofsToEnd - BS.length expectedTag - 1)
+
 {-# INLINE ensureTag #-}
 ensureTag True expectedTag ofs
-  | expectedTag == actualTagName =
+  | isGivenTagBeforeOffset expectedTag ofsToEnd =
       if bs `#{bsIndex}` ofsToEnd == closeTagChar
         then Just (ofsToEnd + 1, False)
       else
         let ofs' = skipToCloseTag (ofs + BS.length expectedTag)
          in Just (ofs' + 1, bs `#{bsIndex}` (ofs' - 1) == slashChar)
   | otherwise = Nothing
-  where (actualTagName, ofsToEnd) = getTagName' ofs
+  where
+    ofsToEnd = getAfterTagOffset ofs
 ensureTag False expectedTag ofs
-  | expectedTag == actualTagName
+  | isGivenTagBeforeOffset expectedTag ofsToEnd
         = Just (ofsToEnd + 1, False)
   | otherwise
         = Nothing
-  where (actualTagName, ofsToEnd) = getTagName' ofs
+  where
+    ofsToEnd = getAfterTagOffset ofs
 parseAttributes attrRouting strOfs arrOfs = do
   let ofs1 = skipSpaces strOfs
       curCh = bs `BSU.unsafeIndex` ofs1 
@@ -397,7 +411,7 @@ parseAttributes attrRouting strOfs arrOfs = do
     parseAttributes attrRouting (attrContentEnd + 1) arrOfs
 {-# INLINE parseTagWithAttrs #-}
 parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs
-  | expectedTag == actualTagName = do
+  | isGivenTagBeforeOffset expectedTag ofsToEnd = do
       arrOfsAfterAttrs <- attrAlloc arrOfs
       if bs `BSU.unsafeIndex` ofsToEnd == closeTagChar
         then pure $ Just ((ofsToEnd + 1, arrOfsAfterAttrs), False)
@@ -407,7 +421,8 @@ parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs
         let ofs' = skipToCloseTag strOfsAfterAttrs
         pure $ Just ((ofs' + 1, arrOfsAfterAttrs), bs `BSU.unsafeIndex` (ofs' - 1) == slashChar)
   | otherwise = pure Nothing
-  where (actualTagName, ofsToEnd) = getTagName' ofs
+  where
+    ofsToEnd = getAfterTagOffset ofs
 
 
 {-# INLINE failExp #-}
