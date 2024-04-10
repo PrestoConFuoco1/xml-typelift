@@ -1395,15 +1395,16 @@ processSeq mbPossibleName quals attrs seqParts = do
       , attributes = attrFields
       , fields
       }
-  elementToField :: TyPartInfo -> CG FieldGI
-  elementToField tyPart = do
-    pure FieldGI
-      { haskellName = case tyPart.inTagInfo of
-        Nothing -> HaskellFieldName tyPart.partType.type_.unHaskellTypeName
-        Just (tagName, _) -> HaskellFieldName tagName
-      , typeName = tyPart.partType
-      , inTagInfo = tyPart.inTagInfo
-      }
+
+elementToField :: TyPartInfo -> CG FieldGI
+elementToField tyPart = do
+  pure FieldGI
+    { haskellName = case tyPart.inTagInfo of
+      Nothing -> HaskellFieldName tyPart.partType.type_.unHaskellTypeName
+      Just (tagName, _) -> HaskellFieldName tagName
+    , typeName = tyPart.partType
+    , inTagInfo = tyPart.inTagInfo
+    }
 
 processChoice ::
   Maybe XmlNameWN ->
@@ -1624,6 +1625,21 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
         )
         , True
         )
+    | Just innerTyPart <- mbFieldsExtension -> do
+      typeName <- getUniqueTypeName possibleName.unXmlNameWN
+      consName <- getUniqueConsName CnoRecord possibleName.unXmlNameWN
+      newFieldsInfo <- mapM (processTyPart Nothing quals False []) innerTyPart
+      newFields <- mapM elementToField newFieldsInfo
+      pure
+        (( typeName
+        , GSeq $ seq_
+          { typeName = typeName
+          , consName = consName
+          , fields = seq_.fields <> NE.toList newFields
+          }
+        )
+        , True
+        )
   _ -> error $ "can't extend type " <> show gi <> " and mixin " <> show mixin
   where
   isSimpleContentType = \case
@@ -1657,6 +1673,13 @@ mkExtendedGI quals mixin possibleName baseType gi = case gi of
     Complex{attrs, inner} -> do
       guard $ inner == Seq []
       NE.nonEmpty attrs
+    _ -> Nothing
+
+  mbFieldsExtension :: Maybe (NE.NonEmpty TyPart)
+  mbFieldsExtension = case mixin of
+    Complex{attrs, inner} | null attrs -> case inner of
+      Seq inners -> NE.nonEmpty inners
+      _ -> Nothing
     _ -> Nothing
 
   isEmptyExtension :: Bool
