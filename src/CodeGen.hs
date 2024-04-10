@@ -15,6 +15,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans  #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE MultiWayIf #-}
 -- | Here we aim to analyze the schema.
 module CodeGen(GenerateOpts(..), parserCodegen, codegen, UseXmlIsogenNaming (..), ShouldGenLenses (..), AllowDuplicatedFields (..)) where
 
@@ -58,6 +59,7 @@ import Data.Bifunctor (Bifunctor(..))
 import Data.Char (isDigit, isUpper, toLower)
 import Data.Generics.Labels
 import Text.Interpolation.Nyan
+import Data.Coerce
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -1490,7 +1492,8 @@ attributeToField headTypeName quals attr = case attr of
       modifyFieldName :: AttrFieldGI -> AttrFieldGI
       modifyFieldName field =
         AttrFieldGI
-          { haskellName = error "should not be used before finalizing"
+          -- { haskellName = error "should not be used before finalizing"
+          { haskellName = HaskellFieldName "ABRA_SCHWABRA_KADABRA"
           , xmlName = field.xmlName
           , typeName = field.typeName
           , attrUse = field.attrUse
@@ -1508,8 +1511,19 @@ attributeToField headTypeName quals attr = case attr of
       , attrUse = use_
       }
 
+stripDigitsSuffix :: XMLString -> XMLString
+stripDigitsSuffix x = do
+  let (pref, suf) = BS.spanEnd (/= '_') x
+  if
+    | pref == "_" -> x
+    | BS.length (getDigits suf) > BS.length (getOthers suf) -> stripDigitsSuffix $ BS.dropEnd 1 pref
+    | otherwise -> x
+  where
+  getDigits = BS.filter isDigit
+  getOthers = BS.filter (not . isDigit)
+
 processType :: QualNamespace -> Maybe XmlNameWN -> Type -> CG TypeWithAttrs
-processType quals mbPossibleName = \case
+processType quals (fmap (coerce stripDigitsSuffix) -> mbPossibleName) = \case
   Ref knownType ->
     lookupHaskellTypeBySchemaType quals knownType
   Complex{mixed, attrs, inner} ->
@@ -1524,8 +1538,8 @@ processType quals mbPossibleName = \case
         enum_ = EnumGI {typeName, constrs}
       registerEnumGI enum_
       pure $ typeNoAttrs typeName $ GEnum enum_
-    Pattern{} -> processAsNewtype base
-    None -> processAsNewtype base
+    Pattern{} -> lookupHaskellTypeBySchemaType quals base
+    None -> lookupHaskellTypeBySchemaType quals base
   Extension{base, mixin} -> do
     baseHType <- lookupHaskellTypeBySchemaType quals base
     let possibleName = fromMaybe (XmlNameWN $ baseHType.type_.unHaskellTypeName <> "Ext") mbPossibleName
@@ -1543,6 +1557,7 @@ processType quals mbPossibleName = \case
     let listGI = ListGI {typeName, consName, itemType = itemType.type_}
     registerListGI listGI
     pure $ TypeWithAttrs typeName $ GList listGI
+{-
   where
   processAsNewtype base = do
       let
@@ -1554,6 +1569,7 @@ processType quals mbPossibleName = \case
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
       pure $ typeNoAttrs typeName $ GWrapper ngi
+-}
 
 attrInfoFromGIType :: GIType -> AttributesInfo
 attrInfoFromGIType = \case
