@@ -39,6 +39,8 @@ import qualified Data.ByteString.Char8 as BSC
 import Debug.Trace (trace)
 import Data.Functor ((<&>))
 import System.FilePath
+import Control.Monad.State
+import qualified Data.Set as Set
 
 
 data Opts = Opts
@@ -53,11 +55,12 @@ data Opts = Opts
 echo :: Show a => String -> a -> a
 echo msg x = {- (msg <> ": " <> show x) `trace`-}  x
 
-processSchemaRec :: FilePath -> IO Schema
+processSchemaRec :: FilePath -> StateT (Set.Set Namespace) IO Schema
 processSchemaRec xmlFilename = do
-  input <- BS.readFile (echo "processed xsd" xmlFilename)
-  (Just schema) <- parseSchema input
+  input <- liftIO $ BS.readFile (echo "processed xsd" xmlFilename)
+  (Just schema) <- liftIO $ parseSchema input
   let currentNamespace = Namespace $ namespace schema
+  modify $ Set.insert currentNamespace
   importedSchemas <- forM (imports schema) $ \import_ -> do
       qual <-
         maybe
@@ -69,9 +72,13 @@ processSchemaRec xmlFilename = do
         Map.fromList $ map (\w -> (qual w, Namespace $ name w)) $ quals schema
       currentTypeDict1 =
         types schema <&> \t -> [(currentNamespace, (t, qualNamespace))]
-  childTypeDicts1 <- forM importedSchemas $ \(_, import_) -> do
+  childTypeDicts1 <- fmap catMaybes $ forM importedSchemas $ \(_, import_) -> do
     let schemaFileName = dropFileName xmlFilename </> BSC.unpack (schemaLocation import_)
-    processSchemaRec schemaFileName
+        importNamespace = Namespace import_.impNamespace
+    processedSet <- get
+    if Set.member importNamespace processedSet
+      then pure $ echo (show importNamespace <> " is already processed") Nothing
+      else Just <$> processSchemaRec schemaFileName
   pure $
     schema
     { typesExtended = Map.unionsWith (++) (currentTypeDict1 : map typesExtended childTypeDicts1)
@@ -81,7 +88,7 @@ processSchema :: Opts -> IO ()
 processSchema Opts{..} = do
     input <- BS.readFile schemaFilename
     -- schema <- fromMaybe (error "no schema parse") <$> parseSchema input
-    schema <- processSchemaRec schemaFilename
+    schema <- evalStateT (processSchemaRec schemaFilename) Set.empty
     -- print $ typesExtended schema
     -- let (flattened, msgs) = flatten schema
     -- forM_ msgs $ hPrint stderr
