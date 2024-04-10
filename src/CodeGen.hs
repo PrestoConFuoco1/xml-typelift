@@ -242,9 +242,10 @@ toError tag strOfs act = do
     act >>= \\case
         Nothing -> failExp ("<" <> tag) strOfs
         Just res -> return res
+{-# INLINE getTagName #-}
 getTagName :: Int -> XMLString
-getTagName strOfs = BS.takeWhile (\\c -> not (isSpaceChar c || c == closeTagChar || c == slashChar)) $ BS.drop (skipToOpenTag strOfs + 1) bs
-getTagName strOfs = fst $ getTagName' $ (skipToOpenTag strOfs + 1)
+getTagName strOfs = fst $ getTagName' $ skipToOpenTag strOfs + 1
+{-# INLINE getTagName' #-}
 getTagName' :: Int -> (XMLString, Int)
 getTagName' strOfs = do
   let isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar
@@ -258,11 +259,15 @@ getTagName' strOfs = do
       afterColon = BS.takeWhile (not . isAfterTag) $ BS.drop (afterNoColonOfs + 1) bs
     (afterColon, afterNoColonOfs + 1 + BS.length afterColon)
  
+{-# INLINE getAttrName #-}
 getAttrName :: Int -> XMLString
 getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs
+{-# INLINE inOneTag #-}
 inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' True tag arrOfs strOfs inParser
+{-# INLINE inOneTagWithAttrs #-}
 inOneTagWithAttrs attrAlloc attrRouting tag arrOfs strOfs inParser =
   toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser
+{-# INLINE inOneTagWithAttrs #-}
 inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
     let tagStrOfs = skipToOpenTag strOfs + 1
     q <- parseTagWithAttrs attrAlloc attrRouting tag arrOfs tagStrOfs
@@ -286,6 +291,7 @@ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
                 return Nothing
         -- FIXME: поддержка пустых типов данных
         -- https://stackoverflow.com/questions/7231902/self-closing-tags-in-xml-files
+{-# INLINE inOneTag #-}
 inOneTag' hasAttrs tag arrOfs strOfs inParser = do
     let tagOfs = skipToOpenTag strOfs + 1
     case ensureTag hasAttrs tag tagOfs of
@@ -307,8 +313,11 @@ inOneTag' hasAttrs tag arrOfs strOfs inParser = do
             else do
                 return Nothing
         -- ~~~~~~~~
+{-# INLINE inMaybeTag #-}
 inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser
+{-# INLINE inMaybeTagWithAttrs #-}
 inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs strOfs inParser
+{-# INLINE inMaybeTagWithAttrs #-}
 inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
     V.unsafeWrite vec arrOfs 1
     inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs + 1) strOfs inParser >>= \\case
@@ -317,6 +326,7 @@ inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
             updateFarthest tag strOfs
             #{vecWrite} vec arrOfs 0
             return (arrOfs + 1, strOfs)
+{-# INLINE inMaybeTag #-}
 inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do
     V.unsafeWrite vec arrOfs 1
     inOneTag' hasAttrs tag (arrOfs + 1) strOfs inParser >>= \\case
@@ -325,9 +335,12 @@ inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do
             updateFarthest tag strOfs
             #{vecWrite} vec arrOfs 0
             return (arrOfs + 1, strOfs)
+{-# INLINE inManyTags #-}
 inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser
+{-# INLINE inManyTagsWithAttrs #-}
 inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser
 -- inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)
+{-# INLINE inManyTags #-}
 inManyTags' hasAttrs tag arrOfs strOfs inParser = do
     (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \\next (cnt, arrOfs', strOfs') ->
         inOneTag' hasAttrs tag arrOfs' strOfs' inParser >>= \\case
@@ -337,6 +350,7 @@ inManyTags' hasAttrs tag arrOfs strOfs inParser = do
                 return (cnt,     arrOfs', strOfs')
     #{vecWrite} vec arrOfs cnt
     return (endArrOfs, endStrOfs)
+{-# INLINE inManyTagsWithAttrs #-}
 inManyTagsWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
     (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \\next (cnt, arrOfs', strOfs') ->
         inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \\case
@@ -346,6 +360,7 @@ inManyTagsWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
                 return (cnt,     arrOfs', strOfs')
     #{vecWrite} vec arrOfs cnt
     return (endArrOfs, endStrOfs)
+{-# INLINE ensureTag #-}
 ensureTag True expectedTag ofs
   | expectedTag == actualTagName =
       if bs `#{bsIndex}` ofsToEnd == closeTagChar
@@ -372,6 +387,7 @@ parseAttributes attrRouting strOfs arrOfs = do
       ofsAttrContent = ofs1 + BS.length attrName + 2
     attrContentEnd <- parseAttrContent (attrRouting arrOfs attrName) ofsAttrContent
     parseAttributes attrRouting (attrContentEnd + 1) arrOfs
+{-# INLINE parseTagWithAttrs #-}
 parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs
   | expectedTag == actualTagName = do
       arrOfsAfterAttrs <- attrAlloc arrOfs
@@ -386,20 +402,25 @@ parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs
   where (actualTagName, ofsToEnd) = getTagName' ofs
 
 
+{-# INLINE failExp #-}
 failExp _expStr _ofs = do
   failOfs <- STRef.readSTRef farthest
   failTag <- STRef.readSTRef farthestTag
   let failActual = substr bs failOfs (BS.length failTag + 10)
   parseError failOfs bs (BSC.unpack $ "Expected tag '" <> failTag <> "', but got '" <> failActual <> "'")
+{-# INLINE updateFarthest #-}
 updateFarthest tag tagOfs = do
   f <- STRef.readSTRef farthest
   when (tagOfs > f) $ do
     STRef.writeSTRef farthest    tagOfs
     STRef.writeSTRef farthestTag tag
+{-# INLINE substr #-}
 substr :: ByteString -> Int -> Int -> ByteString
 substr bs ofs len = BS.take len $ BS.drop ofs bs -- TODO replace with UNSAFE?
 -- parseString :: Int -> Int -> ST s (Int, Int)
+{-# INLINE parseXMLStringContent #-}
 parseXMLStringContent = parseString
+{-# INLINE parseAttrContent #-}
 parseAttrContent arrAttrLocation strStart = do
   let strEnd = skipTo dquoteChar strStart
   when (arrAttrLocation >= 0) do
@@ -407,6 +428,7 @@ parseAttrContent arrAttrLocation strStart = do
     V.unsafeWrite vec (arrAttrLocation+1) (strEnd - strStart)
   return strEnd
 
+{-# INLINE parseString #-}
 parseString arrStart strStart = do
   let strEnd = skipToOpenTag strStart
   #{vecWrite} vec arrStart     strStart
@@ -424,6 +446,7 @@ parseString arrStart strStart = do
         outCodeLine' [int||{-# INLINE parse#{sty}Content #-}|]
         outCodeLine' [int||parse#{sty}Content = parseString|]
       outCodeMultiLines [int|D|
+{-# INLINE parseUnitContent #-}
 parseUnitContent arrStart strStart =
   pure $ (arrStart,) $ parseUnitContentRec (0 :: Int) strStart
 parseUnitContentRec level strStart = do
@@ -444,6 +467,7 @@ parseUnitContentRec level strStart = do
 skipSpaces ofs
   | isSpaceChar (bs `#{bsIndex}` ofs) = skipSpaces (ofs + 1)
   | otherwise = ofs
+{-# INLINE isSpaceChar #-}
 isSpaceChar :: Word8 -> Bool
 isSpaceChar c = c == 32 || c == 10 || c == 9 || c == 13
 skipHeader :: Int -> Int
