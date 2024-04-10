@@ -883,7 +883,7 @@ mkChoiceTypeDeclaration ch =
   ( TyData $ B.byteString ch.typeName.unHaskellTypeName
   , flip map ch.alts \(inTagInfo, _possibleTags, cons_, conType) ->
     ( TyCon $ B.byteString cons_.unHaskellConsName
-    , TyType $ mkTypeWithCardinality inTagInfo $ B.byteString conType.type_.unHaskellTypeName
+    , TyType $ mkTypeWithCardinality True inTagInfo $ B.byteString conType.type_.unHaskellTypeName
     )
   )
 
@@ -891,7 +891,7 @@ mkSequenceTypeDeclaration :: SequenceGI -> (TyData, [Record])
 mkSequenceTypeDeclaration s =
   (TyData $ B.byteString s.typeName.unHaskellTypeName
   , [ ( TyCon $ B.byteString s.consName.unHaskellConsName
-      , map mkAttrFieldDeclaration s.attributes <> map mkFieldDeclaration s.fields
+      , map mkAttrFieldDeclaration s.attributes <> map (mkFieldDeclaration False) s.fields
       )
     ]
   )
@@ -900,35 +900,29 @@ mkAttrContentTypeDeclaration :: ContentWithAttrsGI -> (TyData, [Record])
 mkAttrContentTypeDeclaration cgi =
   ( TyData $ B.byteString cgi.typeName.unHaskellTypeName
   , [ ( TyCon $ B.byteString cgi.consName.unHaskellConsName
-      , map mkAttrFieldDeclaration cgi.attributes <> map mkFieldDeclaration [cgi.content]
+      , map mkAttrFieldDeclaration cgi.attributes <> map (mkFieldDeclaration False) [cgi.content]
       )
     ]
   )
-  {-
-  where
-  contentField :: FieldGI
-  contentField =
-    -- TODO: maybe it's not the best idea to use FieldGI here
-    FieldGI
-      { haskellName = cgi.contentFieldName
-      , typeName = typeNoAttrs cgi.contentType GBaseType
-      , inTagInfo = Nothing
-      }
--}
 
-mkFieldDeclaration :: FieldGI -> TyField
-mkFieldDeclaration fld =
+mkFieldDeclaration :: Bool -> FieldGI -> TyField
+mkFieldDeclaration wrapApplication fld =
   ( TyFieldName $ B.byteString fld.haskellName.unHaskellFieldName
-  , TyType $ mkTypeWithCardinality fld.inTagInfo $ B.byteString fld.typeName.type_.unHaskellTypeName
+  , TyType $ mkTypeWithCardinality wrapApplication fld.inTagInfo $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
 
-mkTypeWithCardinality :: Maybe (a1, Repeatedness) -> B.Builder -> B.Builder
-mkTypeWithCardinality inTagInfo x = case inTagInfo of
+mkTypeWithCardinality :: Bool -> Maybe (a1, Repeatedness) -> B.Builder -> B.Builder
+mkTypeWithCardinality wrapApplication inTagInfo x = case inTagInfo of
   Nothing -> x
   Just (_, card) -> case card of
-    RepMaybe -> "Maybe " <> x
+    RepMaybe -> wrapParens $ "Maybe " <> x
     RepOnce -> x
     _ -> "[" <> x <> "]"
+  where
+  wrapParens txt =
+    if wrapApplication
+    then "(" <> txt <> ")"
+    else txt
 
 mkAttrFieldDeclaration :: AttrFieldGI -> TyField
 mkAttrFieldDeclaration fld =
