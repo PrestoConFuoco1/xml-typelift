@@ -246,12 +246,19 @@ toError tag strOfs act = do
 {-# INLINE getTagName #-}
 getTagName :: Int -> XMLString
 getTagName strOfs = fst $ getTagName' $ skipToOpenTag strOfs + 1
+
+{-# INLINE isAfterTag #-}
+isAfterTag :: Word8 -> Bool
+isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar
+
+{-# INLINE isQualDelim #-}
+isQualDelim :: Word8 -> Bool
+isQualDelim c = c == colonChar
+
 {-# INLINE getTagName' #-}
 getTagName' :: Int -> (XMLString, Int)
 getTagName' strOfs = do
-  let isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar
-      isQualDelim c = c == colonChar
-      noColon = BS.takeWhile (\\c -> not (isAfterTag c || isQualDelim c)) $ BS.drop strOfs bs
+  let noColon = BS.takeWhile (\\c -> not (isAfterTag c || isQualDelim c)) $ BS.drop strOfs bs
       afterNoColonOfs = strOfs + BS.length noColon
   if bs `BSU.unsafeIndex` afterNoColonOfs /= colonChar
   then (noColon, afterNoColonOfs)
