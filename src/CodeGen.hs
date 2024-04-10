@@ -412,24 +412,18 @@ parseString arrStart strStart = do
   #{vecWrite} vec arrStart     strStart
   #{vecWrite} vec (arrStart+1) (strEnd - strStart)
   return (arrStart+2, strEnd)
-parseScientificContent = parseString
-parseDateTimeContent = parseString
-parseDurationContent = parseString
-parseGYearMonthContent = parseString
-parseGYearContent = parseString
-parseBoolContent = parseString
-parseDoubleContent = parseString
-parseFloatContent = parseString
-parseGMonthContent = parseString
-parseIntegerContent = parseString
-parseIntContent = parseString
-parseInt64Content = parseString
-parseDayContent = parseString
-parseTimeOfDayContent = parseString
-parseXDateTimeContent = parseString
-parseXTimeContent = parseString
-parseBooleanContent = parseString
-
+  |]
+      let
+        simpleTypes =
+          [ "Scientific", "DateTime", "Duration", "GYearMonth"
+          , "GYear", "Bool", "Double", "Float", "GMonth"
+          , "Integer", "Int", "Int64", "Day", "TimeOfDay"
+          , "XDateTime", "XTime", "Boolean" :: String
+          ]
+      forM_ simpleTypes \sty -> do
+        outCodeLine' [int||{-# INLINE parse#{sty}Content #-}|]
+        outCodeLine' [int||parse#{sty}Content = parseString|]
+      outCodeMultiLines [int|D|
 parseUnitContent arrStart strStart =
   pure $ (arrStart,) $ parseUnitContentRec (0 :: Int) strStart
 parseUnitContentRec level strStart = do
