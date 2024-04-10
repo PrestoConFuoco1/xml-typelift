@@ -66,8 +66,7 @@ processSchemaRec xmlFilename = do
           (List.find (\p -> impNamespace import_  == name p) (quals schema))
       pure (qual, import_)
   let qualNamespace :: QualNamespace =
-        Map.fromList $ flip map importedSchemas $ \(q, _) -> do
-          (qual q, Namespace $ name q)
+        Map.fromList $ map (\w -> (qual w, Namespace $ name w)) $ quals schema
       currentTypeDict1 =
         types schema <&> \t -> [(currentNamespace, (t, qualNamespace))]
   childTypeDicts1 <- forM importedSchemas $ \(_, import_) -> do

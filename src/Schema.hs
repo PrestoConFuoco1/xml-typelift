@@ -1,4 +1,3 @@
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE DeriveAnyClass      #-}
 {-# LANGUAGE DeriveDataTypeable  #-}
 {-# LANGUAGE DeriveGeneric       #-}
@@ -19,9 +18,6 @@ import           GHC.Generics
 
 import           FromXML                     (XMLString)
 import qualified Data.Map as Map
-import qualified Data.List as List
-import Control.Monad (forM)
-import Data.Maybe (fromMaybe)
 
 class Default a where
   def :: a
@@ -35,15 +31,8 @@ type TypeDict = Map.Map XMLString Type
 type TypeDict1 = Map.Map XMLString [(Namespace, (Type, QualNamespace))]
 
 getSchemaQualNamespace :: Schema -> QualNamespace
-getSchemaQualNamespace schema = do
-  let
-    importedSchemas = flip map (imports schema) $ \import_ -> do
-      (,import_) $ fromMaybe
-          (error "import with no qualification")
-          (List.find (\p -> impNamespace import_  == name p) (quals schema))
-  Map.fromList $ flip map importedSchemas $ \(q, _) -> do
-          (qual q, Namespace $ name q)
-
+getSchemaQualNamespace schema =
+  Map.fromList $ map (\w -> (qual w, Namespace $ name w)) $ quals schema
 
 data SchemaQualificator = SchemaQualificator
   { name :: XMLString
@@ -87,6 +76,7 @@ data Element = Element {
   , eName           :: !ElementName
   , eType           :: !Type
   , targetNamespace :: !NamespaceName
+  , elQuals :: !QualNamespace
   }
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
@@ -96,6 +86,7 @@ instance Default Element where
                 , maxOccurs       = MaxOccurs 1
                 , eType           = def
                 , targetNamespace = "" -- inherit
+                , elQuals = Map.empty
                 }
 
 -- | Check that is a simple type.

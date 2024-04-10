@@ -1109,30 +1109,6 @@ getExtractorNameWithQuant ofs inTagInfo fieldTypeName = do
              Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
              Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
 
-lookupSchemaType :: QualNamespace -> XMLString -> CG (Namespace, (Type, QualNamespace))
-lookupSchemaType quals xmlType = do
-  schemaTypes <- Lens.use schemaTypesMap
-  let (namespaceShort, XmlNameWN -> typeName) = splitNS xmlType
-  let typesWithName =
-        withTypeNotFoundErr $
-          Map.lookup typeName schemaTypes
-  let mbNamespace = do
-        guard $ not $ BS.null namespaceShort
-        Map.lookup (Qual namespaceShort) quals
-
-  pure case mbNamespace of
-    Nothing -> do
-      let typeWithoutSchema = List.find ((== Namespace "") . fst) typesWithName
-      let singleType = guard (length typesWithName == 1) >> Just (head typesWithName)
-      withTypeNotFoundErr $ asum [typeWithoutSchema, singleType]
-    Just namespace_ -> do
-      withTypeNotFoundErr $ List.find ((== namespace_) . fst) typesWithName
-  where
-  withTypeNotFoundErr :: Maybe c -> c
-  withTypeNotFoundErr =
-    fromMaybe $ error $ "type not found: " <> cs xmlType
-
-
 lookupHaskellTypeBySchemaType :: QualNamespace -> XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType quals xmlType =
  let (namespaceShort, XmlNameWN -> typeName) = splitNS xmlType in
@@ -1151,16 +1127,24 @@ lookupHaskellTypeBySchemaType quals xmlType =
       let typesWithName =
             withTypeNotFoundErr $
               Map.lookup typeName schemaTypes
+          q = "namespace qual: " <> show namespaceShort <> "; namespace: "
+                <> show mbNamespace <> " typeName: " <> show typeName <> ":\n"
+          knownQuals = "known quals: " <> show quals <> "\n"
       case mbNamespace of
         Nothing -> do
           let typeWithoutSchema = List.find ((== Namespace "") . fst) typesWithName
-          let singleType = guard (length typesWithName == 1) >> Just (head typesWithName)
-          withTypeNotFoundErr $ asum [typeWithoutSchema, singleType]
+          case typeWithoutSchema of
+            Just res -> res
+            Nothing -> case typesWithName of
+              [] -> error $ q <> ""
+              [res] -> res
+              types -> error $ knownQuals <> q <> "multiple types with name found: " <> show types
+
         Just namespace_ -> do
           withTypeNotFoundErr $ List.find ((== namespace_) . fst) typesWithName
 
   case Map.lookup typeName knownTypes_ of
-    Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN $ xmlType, knownSchType)
+    Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN xmlType, knownSchType)
     Just hTypesWithNamespaces ->
       case List.lookup namespace hTypesWithNamespaces of
         Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN $ xmlType, knownSchType)
