@@ -238,6 +238,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         -- TODO read this from file!
         --
       outCodeMultiLines [int|D|
+{-# INLINE toError #-}
 toError tag strOfs act = do
     act >>= \\case
         Nothing -> failExp ("<" <> tag) strOfs
@@ -267,7 +268,7 @@ inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' Tr
 {-# INLINE inOneTagWithAttrs #-}
 inOneTagWithAttrs attrAlloc attrRouting tag arrOfs strOfs inParser =
   toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser
-{-# INLINE inOneTagWithAttrs #-}
+{-# INLINE inOneTagWithAttrs' #-}
 inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
     let tagStrOfs = skipToOpenTag strOfs + 1
     q <- parseTagWithAttrs attrAlloc attrRouting tag arrOfs tagStrOfs
@@ -291,7 +292,7 @@ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
                 return Nothing
         -- FIXME: поддержка пустых типов данных
         -- https://stackoverflow.com/questions/7231902/self-closing-tags-in-xml-files
-{-# INLINE inOneTag #-}
+{-# INLINE inOneTag' #-}
 inOneTag' hasAttrs tag arrOfs strOfs inParser = do
     let tagOfs = skipToOpenTag strOfs + 1
     case ensureTag hasAttrs tag tagOfs of
@@ -317,7 +318,7 @@ inOneTag' hasAttrs tag arrOfs strOfs inParser = do
 inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser
 {-# INLINE inMaybeTagWithAttrs #-}
 inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs strOfs inParser
-{-# INLINE inMaybeTagWithAttrs #-}
+{-# INLINE inMaybeTagWithAttrs' #-}
 inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
     V.unsafeWrite vec arrOfs 1
     inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs + 1) strOfs inParser >>= \\case
@@ -326,7 +327,7 @@ inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
             updateFarthest tag strOfs
             #{vecWrite} vec arrOfs 0
             return (arrOfs + 1, strOfs)
-{-# INLINE inMaybeTag #-}
+{-# INLINE inMaybeTag' #-}
 inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do
     V.unsafeWrite vec arrOfs 1
     inOneTag' hasAttrs tag (arrOfs + 1) strOfs inParser >>= \\case
@@ -340,7 +341,7 @@ inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inPar
 {-# INLINE inManyTagsWithAttrs #-}
 inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser
 -- inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)
-{-# INLINE inManyTags #-}
+{-# INLINE inManyTags' #-}
 inManyTags' hasAttrs tag arrOfs strOfs inParser = do
     (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \\next (cnt, arrOfs', strOfs') ->
         inOneTag' hasAttrs tag arrOfs' strOfs' inParser >>= \\case
@@ -350,7 +351,7 @@ inManyTags' hasAttrs tag arrOfs strOfs inParser = do
                 return (cnt,     arrOfs', strOfs')
     #{vecWrite} vec arrOfs cnt
     return (endArrOfs, endStrOfs)
-{-# INLINE inManyTagsWithAttrs #-}
+{-# INLINE inManyTagsWithAttrs' #-}
 inManyTagsWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
     (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \\next (cnt, arrOfs', strOfs') ->
         inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \\case
@@ -520,24 +521,30 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
               [qc|extractStringContent ofs = (BS.take bslen (BS.drop bsofs bs), ofs + 2)|]
 
         outCodeMultiLines [int|D|
+{-# INLINE extractStringContent #-}
 extractStringContent :: Int -> (ByteString, Int)
 #{extrStrBody :: String}
   where
     bsofs = echo "extractStringContent:offset" $ arr #{index} ofs
     bslen = echo "extractStringContent:length" $ arr #{index} (ofs + 1)
+{-# INLINE extractMaybe #-}
 extractMaybe ofs subextr
   | arr #{index} ofs == 0 = (Nothing, ofs + 1)
   | otherwise                     = first Just $ subextr (ofs + 1)
+{-# INLINE extractAttribute #-}
 extractAttribute ofs subextr
   | arr `V.unsafeIndex` ofs == 0 = (Nothing, ofs + 2)
   | otherwise                     = first Just $ subextr ofs
+{-# INLINE extractMany #-}
 extractMany ofs subextr = extractMany' (ofs + 1) (arr #{index} ofs)
   where
     extractMany' ofs 0   = ([], ofs)
     extractMany' ofs len =
       let (v, ofs') = subextr ofs
       in first (v:) $ extractMany' ofs' (len - 1)
+{-# INLINE extractUnitContent #-}
 extractUnitContent ofs = ((), ofs)
+{-# INLINE extractXMLStringContent #-}
 extractXMLStringContent = extractStringContent
 |]
         let
@@ -555,32 +562,41 @@ extractXMLStringContent = extractStringContent
           mkCustomParseRawBody :: String -> String -> String
           mkCustomParseRawBody t parse_ = [int||parse#{t}Raw = #{parse_}|]
         for_ typesUsingCustomShortParsers \(t, p) -> do
+          outCodeLine' [int||{-# INLINE parse#{t}Raw #-}|]
           outCodeLine' $ mkParseRawTypeSig t
           outCodeLine' $ mkCustomParseRawBody t p
         for_ (typesUsingCustomParsers <> map fst typesUsingCustomShortParsers) \t -> do
+          outCodeLine' [int||{-# INLINE extract#{t}Content #-}|]
           outCodeLine' [int||extract#{t}Content :: Int -> (#{t}, Int)|]
           outCodeLine' [int||extract#{t}Content = extractAndParse parse#{t}Raw|]
 
         outCodeMultiLines [int|D|
+{-# INLINE parseXMLStringRaw #-}
 parseXMLStringRaw :: ByteString -> Either String ByteString
 parseXMLStringRaw = pure
+{-# INLINE parseBoolRaw #-}
 parseBoolRaw = \\case
     "true" -> Right True
     "1" -> Right True
     "false"-> Right False
     "0" -> Right False
     unexp -> Left $ "unexpected bool value: " <> show unexp
+{-# INLINE first #-}
 first f (a,b) = (f a, b)
+{-# INLINE extractAndParse #-}
 extractAndParse :: (ByteString -> Either String a) -> Int -> (a, Int)
 extractAndParse parser ofs = first (catchErr ofs parser) $ extractStringContent ofs
 
+{-# INLINE catchErr #-}
 catchErr :: Int -> (ByteString -> Either String b) -> ByteString -> b
 catchErr ofs f str = either (parseError bsofs bs) id (f str)
   where bsofs = arr #{index} ofs
 
+{-# INLINE runFlatparser #-}
 runFlatparser :: ByteString -> FP.Parser String a -> Either String a
 runFlatparser bsInp parser = fromFlatparseResult $ FP.runParser parser bsInp 
 
+{-# INLINE fromFlatparseResult #-}
 fromFlatparseResult :: FP.Result String a -> Either String a
 fromFlatparseResult = \\case
   FP.OK res unconsumed -> do
@@ -590,6 +606,7 @@ fromFlatparseResult = \\case
   FP.Err e -> Left e
 fpSkipAsciiChar c = FP.skipSatisfyAscii (== c)
 
+{-# INLINE parseGYearMonthRaw #-}
 parseGYearMonthRaw :: ByteString -> Either String GYearMonth
 parseGYearMonthRaw bsInp = runFlatparser bsInp do
   year <- FP.anyAsciiDecimalInteger
@@ -597,6 +614,7 @@ parseGYearMonthRaw bsInp = runFlatparser bsInp do
   month <- FP.anyAsciiDecimalInt
   pure $ YearMonth year month
 
+{-# INLINE parseGMonthRaw #-}
 parseGMonthRaw :: ByteString -> Either String GMonth
 parseGMonthRaw bsInp = runFlatparser bsInp do
   fpSkipAsciiChar '-'
@@ -604,9 +622,11 @@ parseGMonthRaw bsInp = runFlatparser bsInp do
   month <- FP.anyAsciiDecimalInt
   pure month
 
+{-# INLINE parseDayRaw #-}
 parseDayRaw :: ByteString -> Either String Day
 parseDayRaw bsInp = runFlatparser bsInp parseDayFlat
 
+{-# INLINE parseDayFlat #-}
 parseDayFlat :: FP.Parser String Day
 parseDayFlat = do
   year <- FP.anyAsciiDecimalInteger
@@ -616,6 +636,7 @@ parseDayFlat = do
   day <- FP.anyAsciiDecimalInt
   pure $ fromGregorian year month day
 
+{-# INLINE parseTimeOfDayFlat #-}
 parseTimeOfDayFlat :: FP.Parser String TimeOfDay
 parseTimeOfDayFlat = do
   hours <- FP.anyAsciiDecimalInt
@@ -640,6 +661,7 @@ parseTimeOfDayFlat = do
   let seconds = MkFixed $ secondsInteger * 1_000_000_000_000 + secondsFrac
   pure $ TimeOfDay hours minutes seconds
 
+{-# INLINE parseXDateTimeRaw #-}
 parseXDateTimeRaw :: ByteString -> Either String XDateTime
 parseXDateTimeRaw bsInp = runFlatparser bsInp do
   day <- parseDayFlat
@@ -655,6 +677,7 @@ parseXDateTimeRaw bsInp = runFlatparser bsInp do
     , timezone = mbTimeZone
     }
 
+{-# INLINE parseXTimeRaw #-}
 parseXTimeRaw :: ByteString -> Either String XTime
 parseXTimeRaw bsInp = runFlatparser bsInp do
   timeOfDay <- parseTimeOfDayFlat
@@ -665,6 +688,7 @@ parseXTimeRaw bsInp = runFlatparser bsInp do
     , timezone = mbTimeZone
     }
 
+{-# INLINE parseTimeZoneFlat #-}
 parseTimeZoneFlat :: FP.Parser String TimeZone
 parseTimeZoneFlat = do
   let zUtc = fpSkipAsciiChar 'Z' >> pure utc
@@ -676,6 +700,7 @@ parseTimeZoneFlat = do
         pure $ minutesToTimeZone $ sign * (tzHr * 60 + tzMin)
   asum [zUtc, offsetTz]
 
+{-# INLINE getSign #-}
 getSign :: FP.Parser String Int
 getSign = do
   let
@@ -684,6 +709,7 @@ getSign = do
       pure $ if c == '-' then (-1) else 1
   getSign' <|> pure 1
 
+{-# INLINE parseScientificRaw #-}
 parseScientificRaw :: ByteString -> Either String Scientific
 parseScientificRaw bsInp = runFlatparser bsInp do
   coefSign <- getSign
@@ -709,12 +735,14 @@ parseScientificRaw bsInp = runFlatparser bsInp do
     ]
   pure $ scientific (fromIntegral coefSign * nWithFrac) (afterPointExp + exp_)
 
+{-# INLINE parseIntRaw #-}
 parseIntRaw :: ByteString -> Either String Int
 parseIntRaw bsInp = runFlatparser bsInp do
   coefSign <- getSign
   n <- FP.anyAsciiDecimalInt
   pure $ coefSign * n
 
+{-# INLINE parseIntegerRaw #-}
 parseIntegerRaw :: ByteString -> Either String Integer
 parseIntegerRaw bsInp = runFlatparser bsInp do
   coefSign <- getSign
@@ -740,9 +768,11 @@ generateAuxiliaryFunctions = do
 -}
     outCodeLine' [qc|echo :: Show a => String -> a -> a|]
     outCodeLine' [qc|echo msg x = (msg <> ": " <> show x) `trace` x|]
+    outCodeLine' "{-# INLINE echo #-}"
     outCodeLine' ""
     outCodeLine' [qc|echoN :: Show a => String -> Int -> a -> a|]
     outCodeLine' [qc|echoN msg n x = (msg <> ": " <> take n (show x)) `trace` x|]
+    outCodeLine' "{-# INLINE echoN #-}"
 
 generateParserTop :: CG ()
 generateParserTop = do
