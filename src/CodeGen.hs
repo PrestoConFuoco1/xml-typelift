@@ -1801,7 +1801,6 @@ generateModuleHeading GenerateOpts{..} = do
     unless isUnsafe $ outCodeLine "{-# LANGUAGE Safe #-}"
     outCodeLine "{-# LANGUAGE DuplicateRecordFields #-}"
     outCodeLine "{-# LANGUAGE BlockArguments  #-}"
-    -- TODO add codegen to parser
     outCodeLine "{-# LANGUAGE OverloadedStrings #-}"
     outCodeLine "{-# LANGUAGE RankNTypes #-}"
     outCodeLine "{-# LANGUAGE LambdaCase #-}"
@@ -1812,9 +1811,11 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE TupleSections #-}"
     outCodeLine "{-# LANGUAGE TemplateHaskell #-}"
     outCodeLine "{-# LANGUAGE NumericUnderscores #-}"
-    -- TODO also add in parser generator
-    --
-    --
+    outCodeLine "{-# LANGUAGE MagicHash #-}"
+    outCodeLine "{-# LANGUAGE UnboxedTuples #-}"
+    outCodeLine "{-# LANGUAGE StrictData #-}" -- implied by Strict, but anyway
+    outCodeLine "{-# LANGUAGE Strict #-}"
+    outCodeLine ""
     outCodeLine "module XMLSchema where"
     outCodeLine (basePrologue isUnsafe)
 
