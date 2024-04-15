@@ -264,7 +264,6 @@ isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar
 isQualDelim :: Word8 -> Bool
 isQualDelim c = c == colonChar
 
-{-# INLINE getTagName #-}
 getTagName :: Int -> XMLString
 getTagName ((+1) . skipToOpenTag -> strOfs) = do
   let noColon = BS.takeWhile (\\c -> not (isAfterTag c || isQualDelim c)) $ BS.drop strOfs bs
