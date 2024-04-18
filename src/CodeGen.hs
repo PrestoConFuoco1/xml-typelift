@@ -1084,7 +1084,7 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
             then [qc|first (fromMaybe $ error $ "attribute {haskellAttrName} in type {recType} is required but it's absent") $ |]
             else "" :: String
 
-        out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+        out1 [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
     out1 [qc|let ({contentField}, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
 
@@ -1105,13 +1105,13 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
               if attrRequired
               then [qc|first (fromMaybe $ error $ "attribute {haskellAttrName} in type {recType} is required but it's absent") $ |]
               else "" :: String
-          out1 [qc|let ({haskellAttrName}, ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+          out1 [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
           return haskellAttrName
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
                   fieldName = fld.haskellName
                   extractor = getExtractorNameWithQuant ofs fld.inTagInfo fld.typeName.type_
-              out1 [qc|let ({fieldName}, ofs{ofsIdx}) = {extractor} in|]
+              out1 [qc|let (!{fieldName}, !ofs{ofsIdx}) = {extractor} in|]
               return fieldName
       let fields = attrFields ++ properFields
           ofs' = if null fields then "ofs" else [qc|ofs{length fields}|]::XMLString
@@ -1814,6 +1814,7 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE UnboxedTuples #-}"
     outCodeLine "{-# LANGUAGE StrictData #-}" -- implied by Strict, but anyway
     outCodeLine "{-# LANGUAGE Strict #-}"
+    outCodeLine "{-# LANGUAGE BangPatterns #-}"
     outCodeLine ""
     outCodeLine "module XMLSchema where"
     outCodeLine (basePrologue isUnsafe)
