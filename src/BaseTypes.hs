@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE CPP                 #-}
 {-# LANGUAGE FlexibleContexts    #-}
 {-# LANGUAGE MonoLocalBinds      #-}
@@ -20,17 +21,17 @@ import           Prelude               hiding (lookup)
 
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Set              as Set
-import           Data.String
 #if !MIN_VERSION_base(4,11,0)
 import           Data.Semigroup
 #endif
 
 import           FromXML
 import           Schema
+import Text.Interpolation.Nyan
 
 -- | Module prologue to import all standard types
 basePrologue :: Bool -> String
-basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines baseTypes
+basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
   where
     makeImport modPath = "import " <> modPath <> "\n"
     modules = ["Data.Maybe"
@@ -77,6 +78,8 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
               ,"System.Exit (exitSuccess, exitFailure)"
               ,"System.IO (hPutStrLn, stderr)"
               ,"Control.Monad"
+              ,"Control.Exception"
+              ,"System.IO.Unsafe (unsafePerformIO)"
               ]
               ++ vectorModules
               ++ additionalBytestringModules
@@ -95,18 +98,75 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> unlines base
     prettyPrintModules
       | isUnsafe  = [] -- "Text.Pretty.Simple"]
       | otherwise = []
-    baseTypes =
-      ["type XMLString = ByteString"
-      ,"type GYearMonth = Month"
-      ,"type GYear = Year"
-      ,"type GMonth = MonthOfYear"
-      ,"type Unit = ()"
-      ,"data SP = SP !Integer {-# UNPACK #-} !Int"
-      ,"data WithTimezone a = WithTimezone { timezone :: Maybe TimeZone, value :: a }"
-      ,"  deriving (Show, G.Generic, NFData)"
-      ,"type XDateTime = WithTimezone LocalTime"
-      ,"type XTime = WithTimezone TimeOfDay"
-      ]
+    baseTypes = [int||
+      type XMLString = ByteString
+      type GYearMonth = Month
+      type GYear = Year
+      type GMonth = MonthOfYear
+      type Unit = ()
+      data SP = SP !Integer {-# UNPACK #-} !Int
+      data WithTimezone a = WithTimezone { timezone :: Maybe TimeZone, value :: a }
+        deriving (Show, G.Generic, NFData)
+      type XDateTime = WithTimezone LocalTime
+      type XTime = WithTimezone TimeOfDay
+      data ErrorContext = ErrorContext
+        { offset :: Int
+        , input :: ByteString
+        }
+      data XmlTypeliftException
+        = XmlParsingError Int XMLString ErrorContext
+        | UnknownChoiceTag XMLString XMLString [XMLString] ErrorContext
+        | RequiredAttributeMissing String String
+        | UnknownEnumValue String XMLString
+        | PrimitiveTypeParsingError XMLString String ErrorContext
+        | InternalErrorChoiceInvalidIndex Int XMLString
+        deriving anyclass Exception
+
+      instance Show XmlTypeliftException where
+        show = ppXmlTypeliftException
+
+      ppXmlTypeliftException :: XmlTypeliftException -> String
+      ppXmlTypeliftException = \\case
+        XmlParsingError failOfs failTag ctx@ErrorContext{input} -> do
+          let failActual = BS.take (BS.length failTag + 10) $ BS.drop failOfs input
+          ppWithErrorContext ctx $
+            "Expected tag '" <> BSC.unpack failTag <> "', but got '" <> BSC.unpack failActual <> "'"
+        UnknownChoiceTag unexpTag hsType possibleTags ctx ->
+          ppWithErrorContext ctx $
+            "Unexpected tag '" <> BSC.unpack unexpTag <> "' for choice type " <> BSC.unpack hsType <> "; expected one of " <> show possibleTags
+        RequiredAttributeMissing attrName hsType ->
+          "Attribute '" <> attrName <> "' in type '" <> hsType <> "' is required but it's absent"
+        UnknownEnumValue hsType unknownVal ->
+          "Unknown enum value of type '" <> hsType <> "': " <> BSC.unpack unknownVal
+        PrimitiveTypeParsingError unknownVal reason ctx ->
+          ppWithErrorContext ctx $
+            "Failed to parse value of primitive type; value: '" <> BSC.unpack unknownVal <> "', reason: '" <> reason <> "'"
+        InternalErrorChoiceInvalidIndex consIdx hsType ->
+          "Invalid code generated: wrong alternative index for choice type '" <> BSC.unpack hsType <> "': " <> show consIdx
+
+      {-# INLINE throwWithContext #-}
+      throwWithContext :: ByteString -> Int -> (ErrorContext -> XmlTypeliftException) -> b
+      throwWithContext totalInput bsOfs mkErr = throw $ mkErr $ ErrorContext bsOfs totalInput
+
+      -- | Show error with context
+      ppWithErrorContext :: ErrorContext -> String -> String
+      ppWithErrorContext ErrorContext{offset=ofs, input=inputStr} msg =
+        msg <> "\\nIn line " <> show lineCount <> " (offset " <> show ofs <> "):"
+          <> BSC.unpack inputStrPart <> "\\n"
+          <> replicate errPtrStickLen '-' <> "^"
+        where
+          lineCount           = succ $ BS.count nextLineChar $ BS.take ofs inputStr
+          lastLineBeforeStart = maybe 0 id $ BS.elemIndexEnd nextLineChar $ til ofs
+          sndLastLineStart    = maybe 0 id $ BS.elemIndexEnd nextLineChar $ til lastLineBeforeStart
+          lastLineStart       = max 0 $ max (ofs - 120) sndLastLineStart
+          lastLineLen         = min 40 $ maybe 40 id $ BS.elemIndex nextLineChar (BS.drop ofs inputStr)
+          til len             = BS.take len inputStr
+          errPtrStickLen      = max 0 (ofs - lastLineBeforeStart - 1)
+          nextLineChar        = 10 -- '\\n'
+          inputStrPart        = BS.take (ofs - lastLineStart + lastLineLen) $ BS.drop lastLineStart inputStr
+
+
+      |]
 
 
 baseTranslations :: [(BS.ByteString, BS.ByteString)]

@@ -132,9 +132,9 @@ codegen c sch =
 
 withFourmoluDisable :: CG a -> CG a
 withFourmoluDisable action = do
-  outCodeLine' "{- FOURMOLU DISABLE -}"
+  outCodeLine' "{- FOURMOLU_DISABLE -}"
   res <- action
-  outCodeLine' "{- FOURMOLU ENABLE -}"
+  outCodeLine' "{- FOURMOLU_ENABLE -}"
   pure res
 
 generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
@@ -208,8 +208,8 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
     when (minOccurs topEl /= 1) $ parseErrorBs topName [qc|Wrong minOccurs = {minOccurs topEl}|]
     when (maxOccurs topEl /= MaxOccurs 1) $ parseErrorBs topName [qc|Wrong maxOccurs = {maxOccurs topEl}|]
     let repeatedness = RepOnce
-    outCodeLine' [qc|parseTopLevelToArray :: ByteString -> Either String TopLevelInternal|]
-    outCodeLine' [qc|parseTopLevelToArray bs = Right $ TopLevelInternal bs $ V.create $ do|]
+    outCodeLine' [qc|parseTopLevelToArray :: ByteString -> TopLevelInternal|]
+    outCodeLine' [qc|parseTopLevelToArray bs = TopLevelInternal bs $ V.create $ do|]
     withIndent $ do
         outCodeLine' [qc|vec <- {vecNew} ((max 1 (BS.length bs `div` 7)) * 2)|] -- TODO add code to strip vector
         outCodeLine' [qc|farthest    <- STRef.newSTRef 0 -- farthest index so far|]
@@ -436,8 +436,8 @@ parseTagWithAttrs attrAlloc attrRouting expectedTag arrOfs ofs
 failExp _expStr _ofs = do
   failOfs <- STRef.readSTRef farthest
   failTag <- STRef.readSTRef farthestTag
-  let failActual = substr bs failOfs (BS.length failTag + 10)
-  parseError failOfs bs (BSC.unpack $ "Expected tag '" <> failTag <> "', but got '" <> failActual <> "'")
+  throw $ XmlParsingError failOfs failTag ErrorContext{offset=failOfs, input=bs}
+
 {-# INLINE updateFarthest #-}
 updateFarthest tag tagOfs = do
   f <- STRef.readSTRef farthest
@@ -611,15 +611,15 @@ parseBoolRaw = \\case
     "0" -> Right False
     unexp -> Left $ "unexpected bool value: " <> show unexp
 {-# INLINE first #-}
-first f (a,b) = (f a, b)
+first f (a,b) = (,b) $! f a
 {-# INLINE extractAndParse #-}
 extractAndParse :: (ByteString -> Either String a) -> Int -> (a, Int)
 extractAndParse parser ofs = first (catchErr ofs parser) $ extractStringContent ofs
 
 {-# INLINE catchErr #-}
 catchErr :: Int -> (ByteString -> Either String b) -> ByteString -> b
-catchErr ofs f str = either (parseError bsofs bs) id (f str)
-  where bsofs = arr #{index} ofs
+catchErr ofs f str = either (throwWithContext bs bsOfs . PrimitiveTypeParsingError str) id (f str)
+  where bsOfs = arr #{index} ofs
 
 {-# INLINE runFlatparser #-}
 runFlatparser :: ByteString -> FP.Parser String a -> Either String a
@@ -803,33 +803,14 @@ generateAuxiliaryFunctions = do
     outCodeLine' [qc|echoN msg n x = (msg <> ": " <> take n (show x)) `trace` x|]
     outCodeLine' "{-# INLINE echoN #-}"
     outCodeLine' ""
-    outCodeLine' "-- | Show error with context"
     outCodeLine' [qc|parseError :: Int -> ByteString -> String -> a|]
-    outCodeLine' [qc|parseError ofs inputStr msg =|]
-    outCodeLine' [qc|    error $ msg <> "\nIn line " <> show lineCount <> " (offset " <> show ofs <> "):"|]
-    outCodeLine' [qc|         <> BSC.unpack inputStrPart <> "\n"|]
-    outCodeLine' [qc|         <> replicate errPtrStickLen '-' <> "^"|]
-    outCodeLine' [qc|  where|]
-    outCodeLine' [qc|    lineCount           = succ $ BS.count nextLineChar $ BS.take ofs inputStr|]
-    outCodeLine' [qc|    lastLineBeforeStart = maybe 0 id $ BS.elemIndexEnd nextLineChar $ til ofs|]
-    outCodeLine' [qc|    sndLastLineStart    = maybe 0 id $ BS.elemIndexEnd nextLineChar $ til lastLineBeforeStart|]
-    outCodeLine' [qc|    lastLineStart       = max 0 $ max (ofs - 120) sndLastLineStart|]
-    outCodeLine' [qc|    lastLineLen         = min 40 $ maybe 40 id $ BS.elemIndex nextLineChar (BS.drop ofs inputStr)|]
-    outCodeLine' [qc|    til len             = BS.take len inputStr|]
-    outCodeLine' [qc|    errPtrStickLen      = max 0 (ofs - lastLineBeforeStart - 1)|]
-    outCodeLine' [qc|    nextLineChar        = 10 -- '\n'|]
-    outCodeLine' [qc|    inputStrPart        = BS.take (ofs - lastLineStart + lastLineLen) $ BS.drop lastLineStart inputStr|]
-    outCodeLine' ""
-    outCodeLine' ""
-    outCodeLine' [qc|parseErrorBs :: ByteString -> String -> a|]
-    outCodeLine' [qc|parseErrorBs inputStr@(PS _ start _) msg =|]
-    outCodeLine' [qc|    parseError start inputStr msg|]
+    outCodeLine' [qc|parseError offset input msg = error $ ppWithErrorContext ErrorContext\{offset, input} msg|]
     outCodeLine' ""
 
 generateParserTop :: CG ()
 generateParserTop = do
-    outCodeLine "parse :: ByteString -> Either String TopLevel" -- TODO
-    outCodeLine "parse = fmap extractTopLevel . parseTopLevelToArray"
+    outCodeLine "parse :: ByteString -> Either XmlTypeliftException TopLevel" -- TODO
+    outCodeLine "parse bs = unsafePerformIO $ try $ evaluate $ extractTopLevel $ parseTopLevelToArray bs"
 
 generateMainFunction :: HasCallStack => GenerateOpts -> CG ()
 generateMainFunction GenerateOpts{..} = trace "main" do
@@ -843,7 +824,7 @@ generateMainFunction GenerateOpts{..} = trace "main" do
             withIndent $ do
                 outCodeLine' [qc|Left err -> do|]
                 withIndent $ do
-                    outCodeLine' [qc|hPutStrLn stderr $ "Error while parsing \"" ++ filename ++ "\": " ++ err|]
+                    outCodeLine' [qc|hPutStrLn stderr $ "Error while parsing \"" ++ filename ++ "\": " ++ ppXmlTypeliftException err|]
                     outCodeLine' [qc|exitFailure|]
                 outCodeLine' [qc|Right result -> do|]
                 withIndent $ do
@@ -1046,6 +1027,12 @@ generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
             generateParseElementCall ("(arrStart + 1)", "strStart") inTagInfo type_
       forM_ possibleFirstTags \firstTag ->
         out1 [qc|"{firstTag}" -> {captureCon} >> {parseFunc1}|]
+    withIndent1 $ do
+      let totalPossibleFirstTags = concatMap get2Of4 ch.alts
+      out1 [qc|unknown -> throwWithContext bs (1 + skipToOpenTag (strStart + 1)) $ UnknownChoiceTag unknown "{typeName}" {totalPossibleFirstTags}|]
+  where
+  typeName = ch.typeName
+  get2Of4 (_, x, _, _) = x
 
 generateChoiceExtractFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
@@ -1057,9 +1044,10 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
     out1 [qc|case altIdx of|]
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((inTagInfo, _possibleFirstTags, cons_, type_), altIdx) -> do
       let typeName = type_.type_
-      -- out1 [qc|{altIdx} -> first {cons_} $ extract{typeName}Content (ofs + 1)|]
       let extractor = getExtractorNameWithQuant "(ofs + 1)" inTagInfo typeName
       out1 [qc|{altIdx} -> first {cons_} $ {extractor}|]
+    withIndent1 $ do
+      out1 [qc|wrongIndex -> throw $ InternalErrorChoiceInvalidIndex wrongIndex "{chName}"|]
 
 generateAttrContentExtract :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
@@ -1081,11 +1069,11 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
         let
           requiredModifier =
             if attrRequired
-            then [qc|first (fromMaybe $ error $ "attribute {haskellAttrName} in type {recType} is required but it's absent") $ |]
+            then [qc|first (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
             else "" :: String
 
         out1 [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
-    out1 [qc|let ({contentField}, ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
+    out1 [qc|let (!{contentField}, !ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
 
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
@@ -1103,7 +1091,7 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
           let
             requiredModifier =
               if attrRequired
-              then [qc|first (fromMaybe $ error $ "attribute {haskellAttrName} in type {recType} is required but it's absent") $ |]
+              then [qc|first (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
               else "" :: String
           out1 [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
           return haskellAttrName
@@ -1734,7 +1722,8 @@ generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
   withIndent1 do
     for_ en.constrs \(xmlName, haskellCon) ->
       out1 [qc|"{xmlName}" -> pure {haskellCon}|]
-    out1 [qc|unknown -> error $ "unknown enum value: " <> show unknown|]
+    -- out1 [qc|unknown -> error $ "unknown enum value: " <> show unknown|]
+    out1 [qc|unknown -> throw $ UnknownEnumValue "{recType}" unknown|]
 
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 do
@@ -1815,6 +1804,7 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE StrictData #-}" -- implied by Strict, but anyway
     outCodeLine "{-# LANGUAGE Strict #-}"
     outCodeLine "{-# LANGUAGE BangPatterns #-}"
+    outCodeLine "{-# LANGUAGE NamedFieldPuns #-}"
     outCodeLine ""
     outCodeLine "module XMLSchema where"
     outCodeLine (basePrologue isUnsafe)
