@@ -1049,6 +1049,23 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
     withIndent1 $ do
       out1 [qc|wrongIndex -> throw $ InternalErrorChoiceInvalidIndex wrongIndex "{chName}"|]
 
+generateSingleAttrExtract :: HaskellTypeName -> AttrFieldGI -> Int -> String
+generateSingleAttrExtract recType attr aIdx = do
+  let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
+  let haskellAttrName = attr.haskellName.unHaskellFieldName
+  let haskellTypeName = attr.typeName.type_
+  let
+    attrRequired = case attr.attrUse of
+      Required -> True
+      _ -> False
+  let
+    requiredModifier =
+      if attrRequired
+      then [qc|first (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
+      else "" :: String
+
+  [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+
 generateAttrContentExtract :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
   let recType = cgi.typeName
@@ -1058,21 +1075,8 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
   let consName = cgi.consName
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 $ do
-    forM_ (zip cgi.attributes [1..attrNum]) $ \(attr, aIdx) -> do
-        let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
-        let haskellAttrName = attr.haskellName.unHaskellFieldName
-        let haskellTypeName = attr.typeName.type_
-        let
-          attrRequired = case attr.attrUse of
-            Required -> True
-            _ -> False
-        let
-          requiredModifier =
-            if attrRequired
-            then [qc|first (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
-            else "" :: String
-
-        out1 [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+    forM_ (zip cgi.attributes [1..attrNum]) $ \(attr, aIdx) ->
+        out1 $ generateSingleAttrExtract recType attr aIdx
     out1 [qc|let (!{contentField}, !ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
     out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
 
@@ -1083,18 +1087,8 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
   out1 [qc|extract{recType}Content ofs =|]
   withIndent1 $ do
       attrFields <- forM (zip s.attributes [1..attrNum]) $ \(attr, aIdx) -> do
-          let oldOfs = if aIdx == 1 then "ofs" :: XMLString else [qc|ofs{aIdx-1}|]
-          let haskellAttrName = attr.haskellName
-          let haskellTypeName = attr.typeName.type_
-          let
-            attrRequired = attr.attrUse == Required
-          let
-            requiredModifier =
-              if attrRequired
-              then [qc|first (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
-              else "" :: String
-          out1 [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
-          return haskellAttrName
+        out1 $ generateSingleAttrExtract recType attr aIdx
+        return attr.haskellName
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
                   fieldName = fld.haskellName
