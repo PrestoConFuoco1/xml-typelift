@@ -796,11 +796,11 @@ generateAuxiliaryFunctions = do
     outCodeLine' [qc|echoN = \_ _ -> id|]
 -}
     outCodeLine' [qc|echo :: Show a => String -> a -> a|]
-    outCodeLine' [qc|echo msg x = (msg <> ": " <> show x) `trace` x|]
+    outCodeLine' [qc|echo msg x = x -- (msg <> ": " <> show x) `trace` x|]
     outCodeLine' "{-# INLINE echo #-}"
     outCodeLine' ""
     outCodeLine' [qc|echoN :: Show a => String -> Int -> a -> a|]
-    outCodeLine' [qc|echoN msg n x = (msg <> ": " <> take n (show x)) `trace` x|]
+    outCodeLine' [qc|echoN msg n x = x -- (msg <> ": " <> take n (show x)) `trace` x|]
     outCodeLine' "{-# INLINE echoN #-}"
     outCodeLine' ""
     outCodeLine' [qc|parseError :: Int -> ByteString -> String -> a|]
