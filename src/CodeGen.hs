@@ -284,7 +284,7 @@ getAttrName :: Int -> XMLString
 getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop strOfs bs
 
 {-# INLINE inOneTag #-}
-inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' True tag arrOfs strOfs inParser
+inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' tag arrOfs strOfs inParser
 {-# INLINE inOneTagWithAttrs #-}
 inOneTagWithAttrs attrAlloc attrRouting tag arrOfs strOfs inParser =
   toError tag strOfs $ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser
@@ -313,11 +313,12 @@ inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
         -- FIXME: поддержка пустых типов данных
         -- https://stackoverflow.com/questions/7231902/self-closing-tags-in-xml-files
 {-# INLINE inOneTag' #-}
-inOneTag' hasAttrs tag arrOfs strOfs inParser = do
-    let tagOfs = skipToOpenTag strOfs + 1
-    case ensureTag hasAttrs tag tagOfs of
+inOneTag' tag arrOfs strOfs inParser = do
+    -- let tagOfs = skipToOpenTag strOfs + 1
+    -- case ensureTag hasAttrs tag tagOfs of
+    case ensureTag True tag (skipToOpenTag strOfs + 1) of
         Nothing -> do
-            updateFarthest tag tagOfs
+            updateFarthest tag (skipToOpenTag strOfs + 1)
             return Nothing
         Just (ofs', True) -> do
             (arrOfs, strOfs) <- inParser arrOfs (ofs' - 1) -- TODO points to special unparseable place
@@ -328,14 +329,14 @@ inOneTag' hasAttrs tag arrOfs strOfs inParser = do
             if bs `#{bsIndex}` (ofs'' + 1) == slashChar then do
                 case ensureTag False tag (ofs'' + 2) of
                     Nothing     -> do
-                        updateFarthest tag tagOfs
+                        updateFarthest tag $ (skipToOpenTag strOfs + 1)
                         return Nothing
                     Just (ofs''', _) -> return $ Just (arrOfs, ofs''')
             else do
                 return Nothing
         -- ~~~~~~~~
 {-# INLINE inMaybeTag #-}
-inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' True tag arrOfs strOfs inParser
+inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' tag arrOfs strOfs inParser
 {-# INLINE inMaybeTagWithAttrs #-}
 inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs strOfs inParser
 {-# INLINE inMaybeTagWithAttrs' #-}
@@ -348,23 +349,23 @@ inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
             #{vecWrite} vec arrOfs 0
             return (arrOfs + 1, strOfs)
 {-# INLINE inMaybeTag' #-}
-inMaybeTag' hasAttrs tag arrOfs strOfs inParser = do
+inMaybeTag' tag arrOfs strOfs inParser = do
     V.unsafeWrite vec arrOfs 1
-    inOneTag' hasAttrs tag (arrOfs + 1) strOfs inParser >>= \\case
+    inOneTag' tag (arrOfs + 1) strOfs inParser >>= \\case
         Just res -> return res
         Nothing -> do
             updateFarthest tag strOfs
             #{vecWrite} vec arrOfs 0
             return (arrOfs + 1, strOfs)
 {-# INLINE inManyTags #-}
-inManyTags tag arrOfs strOfs inParser = inManyTags' True tag arrOfs strOfs inParser
+inManyTags tag arrOfs strOfs inParser = inManyTags' tag arrOfs strOfs inParser
 {-# INLINE inManyTagsWithAttrs #-}
 inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser
 -- inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)
 {-# INLINE inManyTags' #-}
-inManyTags' hasAttrs tag arrOfs strOfs inParser = do
+inManyTags' tag arrOfs strOfs inParser = do
     (cnt, endArrOfs, endStrOfs) <- flip fix (0, (arrOfs + 1), strOfs) $ \\next (cnt, arrOfs', strOfs') ->
-        inOneTag' hasAttrs tag arrOfs' strOfs' inParser >>= \\case
+        inOneTag' tag arrOfs' strOfs' inParser >>= \\case
             Just (arrOfs'', strOfs'') -> next   (cnt + 1, arrOfs'', strOfs'')
             Nothing                   -> do
                 updateFarthest tag strOfs
