@@ -214,6 +214,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|vec <- {vecNew} ((max 1 (BS.length bs `div` 7)) * 2)|] -- TODO add code to strip vector
         outCodeLine' [qc|farthest    <- STRef.newSTRefU 0 -- farthest index so far|]
         outCodeLine' [qc|farthestTag <- STRef.newSTRef ("<none>" :: ByteString)|]
+        outCodeLine' [qc|parseAttrsResultRef <- STRef.newSTRefU (0 :: Int)|]
         outCodeLine' [qc|let|]
         withIndent $ do
             --outCodeLine' [qc|parse{topName} :: forall s . UMV.STVector s Int -> ST s ()|]
@@ -277,6 +278,7 @@ isAfterTag c = isSpaceChar c || c == closeTagChar || c == slashChar
 isQualDelim :: Word8 -> Bool
 isQualDelim c = c == colonChar
 
+{-# INLINE getTagName #-}
 getTagName :: Int# -> XMLString
 getTagName strOfsOld = do
   let strOfs = skipToOpenTag strOfsOld +# 1#
@@ -433,7 +435,7 @@ parseAttributes attrRouting strOfs (arrOfs :: Int#) = do
   let ofs1 = skipSpaces strOfs
       curCh = bs `bsIndex` ofs1 
   if curCh == slashChar || curCh == closeTagChar
-    then pure (I# ofs1)
+    then STRef.writeSTRefU parseAttrsResultRef (I# ofs1)
     else do
     let
       attrName = getAttrName ofs1
@@ -447,7 +449,8 @@ parseTagWithAttrs attrAlloc attrRouting expectedTag (arrOfs :: Int#) ofs
       if bs `bsIndex` ofsToEnd == closeTagChar
         then pure $ Just ((I# (ofsToEnd +# 1#), arrOfsAfterAttrs), False)
       else do
-        I# strOfsAfterAttrs <- parseAttributes attrRouting ofsToEnd arrOfs
+        parseAttributes attrRouting ofsToEnd arrOfs
+        I# strOfsAfterAttrs <- STRef.readSTRefU parseAttrsResultRef
         let ofs' = skipToCloseTag strOfsAfterAttrs
         pure $ Just ((I# (ofs' +# 1#), arrOfsAfterAttrs), bs `bsIndex` (ofs' -# 1#) == slashChar)
   | otherwise = pure Nothing
@@ -964,12 +967,19 @@ generateAttrContentParse :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentParse cgi = FunctionBody $ runCodeWriter do
   generateAttrsAllocation
     TypeWithAttrs {type_ = cgi.typeName, giType = GAttrContent cgi}
-  out1 (getParserNameForType cgi.typeName <> " = " <> getParserNameForType cgi.content.typeName.type_)
+  let funcName = getParserNameForType cgi.typeName
+  emitInline funcName
+  out1 (funcName <> " = " <> getParserNameForType cgi.content.typeName.type_)
+
+emitInline :: String -> CodeWriter
+emitInline funcName = out1 $ "{-# INLINE " <> funcName <> " #-}"
 
 generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
   generateAttrsAllocation
     TypeWithAttrs { type_ = s.typeName, giType = GSeq s }
+  let funcName = getParserNameForType s.typeName
+  emitInline funcName
   out1 (getParserNameForType s.typeName <> " arrStart strStart = do")
   withIndent1 do
     let (arrStart, strStart) = ("arrStart", "strStart")
@@ -992,11 +1002,15 @@ generateAttrsAllocation TypeWithAttrs{type_, giType} =
   withPresentAttrs \attrs -> do
     let attrsNum = length attrs
     let totalAllocLen = 2*attrsNum
-    out1 [qc|{getAttrsAllocatorName type_} ofs = do|]
+        allocatorName = getAttrsAllocatorName type_
+    emitInline allocatorName
+    out1 [qc|{allocatorName} ofs = do|]
     withIndent1 do
       out1 [qc|forM_ [0..{totalAllocLen - 1}] $ \(I# i) -> vecWrite vec (ofs +# i) 0#|]
       out1 [qc|pure $ I# (ofs +# {totalAllocLen}#)|]
-    out1 [qc|{getAttrsRoutingName type_} (ofs :: Int#) = \case|]
+    let routingName = getAttrsRoutingName type_
+    emitInline routingName
+    out1 [qc|{routingName} (ofs :: Int#) = \case|]
     withIndent1 $ do
       forM_ (zip [0::Int, 2 .. ] $ NE.toList attrs) \(ofs, attr) ->
         out1 [qc|"{attr}" -> ofs +# {ofs}#|]
@@ -1030,15 +1044,17 @@ generateParseElementCall (arrOfs, strOfs) inTagInfo typeWithAttrs = do
     Just (tagName, tagQuantifier) -> 
       [qc|{tagQModifier tagQuantifier} {allocator}"{tagName}" {arrOfs} {strOfs} {parserName}|]
 
-getAttrsRoutingName :: HaskellTypeName -> XMLString
+getAttrsRoutingName :: HaskellTypeName -> String
 getAttrsRoutingName t = [qc|get{t}AttrOffset|]
 
-getAttrsAllocatorName :: HaskellTypeName -> XMLString
+getAttrsAllocatorName :: HaskellTypeName -> String
 getAttrsAllocatorName t = [qc|allocate{t}Attrs|]
 
 generateChoiceParseFunctionBody :: ChoiceGI -> FunctionBody
-generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $
-  out1 (getParserNameForType ch.typeName <> " arrStart strStart = do") >> withIndent1 do
+generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $ do
+  let funcName = getParserNameForType ch.typeName
+  emitInline funcName
+  out1 (funcName <> " arrStart strStart = do") >> withIndent1 do
     out1 [qc|let tagName = getTagName strStart|]
     out1 [qc|case tagName of|]
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((inTagInfo, possibleFirstTags, _cons, type_), altIdx) -> do
@@ -1712,8 +1728,10 @@ mkListDeclaration lgi =
   )
 
 generateContentTypeParseFunc :: HaskellTypeName -> FunctionBody
-generateContentTypeParseFunc typeName = FunctionBody $ runCodeWriter $
-  out1 (getParserNameForType typeName <> " = parseString")
+generateContentTypeParseFunc typeName = FunctionBody $ runCodeWriter $ do
+  let funcName = getParserNameForType typeName
+  emitInline funcName
+  out1 (funcName <> " = parseString")
 
 generateNewtypeExtractFunc :: NewtypeGI -> FunctionBody
 generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
