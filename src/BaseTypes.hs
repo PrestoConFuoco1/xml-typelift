@@ -80,7 +80,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
               ,"System.IO (hPutStrLn, stderr)"
               ,"Control.Monad"
               ,"Control.Exception"
-              ,"Data.Hashable"
+              -- ,"Data.Hashable"
               ,"System.IO.Unsafe (unsafePerformIO)"
               ,"GHC.Exts"
               ]
@@ -102,6 +102,14 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
       | isUnsafe  = [] -- "Text.Pretty.Simple"]
       | otherwise = []
     baseTypes = [int||
+      {-# INLINE hash #-}
+      hash :: ByteString -> Int
+      hash bs = BS.foldl' f 0 bs
+        where
+        unI# (I# i) = i
+        f (I# acc) w8 =
+          I# (256# *# acc +# unI# (fromIntegral w8))
+
       type XMLString = ByteString
       type GYearMonth = Month
       type GYear = Year
