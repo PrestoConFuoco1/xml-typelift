@@ -110,6 +110,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
       data WithTimezone a = WithTimezone { timezone :: Maybe TimeZone, value :: a }
         deriving (Show, G.Generic, NFData)
       data ArrStrOfss = ArrStrOfss !Int# !Int#
+      emptyArrStrOfss = ArrStrOfss (-1#) (-1#)
       type XDateTime = WithTimezone LocalTime
       type XTime = WithTimezone TimeOfDay
       data ErrorContext = ErrorContext

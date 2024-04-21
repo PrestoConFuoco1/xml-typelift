@@ -260,8 +260,10 @@ unI# (I# n) = n
 {-# INLINE toError #-}
 toError tag (strOfs :: Int#) act = do
     act >>= \\case
-        Nothing -> failExp ("<" <> tag) strOfs
-        Just res -> return res
+        res@(ArrStrOfss arrOfs' _) ->
+          if I# arrOfs' < 0
+          then failExp ("<" <> tag) strOfs
+          else return res
 
 {-# INLINE isBeforeTag #-}
 isBeforeTag :: Word8 -> Bool
@@ -307,10 +309,10 @@ inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) i
     case q of
         Nothing -> do
             updateFarthest tag tagStrOfs
-            return Nothing
+            return emptyArrStrOfss
         Just ((I# ofs', I# arrOfs'), True) -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs' (ofs' -# 1#)
-            return $ Just $ ArrStrOfss arrOfs ofs'
+            return $ ArrStrOfss arrOfs ofs'
         Just ((I# ofs', I# arrOfs'), False) -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs' ofs'
             let ofs'' = skipToOpenTag strOfs
@@ -318,10 +320,10 @@ inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) i
                 case ensureTag False tag (ofs'' +# 2#) of
                     Nothing     -> do
                         updateFarthest tag tagStrOfs
-                        return Nothing
-                    Just (I# ofs''', _) -> pure $ Just $ ArrStrOfss arrOfs ofs'''
+                        return emptyArrStrOfss
+                    Just (I# ofs''', _) -> pure $ ArrStrOfss arrOfs ofs'''
             else do
-                return Nothing
+                return emptyArrStrOfss
         -- FIXME: поддержка пустых типов данных
         -- https://stackoverflow.com/questions/7231902/self-closing-tags-in-xml-files
 {-# INLINE inOneTag' #-}
@@ -330,10 +332,10 @@ inOneTag' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
     case ensureTag True tag tagOfs of
         Nothing -> do
             updateFarthest tag tagOfs
-            return Nothing
+            return emptyArrStrOfss
         Just (I# ofs', True) -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs (ofs' -# 1#) -- TODO points to special unparseable place
-            return $ Just $ ArrStrOfss arrOfs ofs'
+            return $ ArrStrOfss arrOfs ofs'
         Just (I# ofs', _) -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs ofs'
             let ofs'' = skipToOpenTag strOfs
@@ -341,10 +343,10 @@ inOneTag' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
                 case ensureTag False tag (ofs'' +# 2#) of
                     Nothing     -> do
                         updateFarthest tag tagOfs
-                        return Nothing
-                    Just (I# ofs''', _) -> return $ Just $ ArrStrOfss arrOfs ofs'''
+                        return emptyArrStrOfss
+                    Just (I# ofs''', _) -> return $ ArrStrOfss arrOfs ofs'''
             else do
-                return Nothing
+                return emptyArrStrOfss
         -- ~~~~~~~~
 {-# INLINE inMaybeTag #-}
 inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' tag arrOfs strOfs inParser
@@ -354,20 +356,24 @@ inMaybeTagWithAttrs tag arrOfs strOfs inParser = inMaybeTagWithAttrs' tag arrOfs
 inMaybeTagWithAttrs' attrAlloc attrRouting tag arrOfs strOfs inParser = do
     vecWrite vec arrOfs 1#
     inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs +# 1#) strOfs inParser >>= \\case
-        Just res -> return res
-        Nothing -> do
+        res@(ArrStrOfss arrOfs' _) ->
+          if I# arrOfs' < 0
+          then do
             updateFarthest tag strOfs
             #{vecWrite} vec arrOfs 0#
             return $! ArrStrOfss (arrOfs +# 1#) strOfs
+          else return res
 {-# INLINE inMaybeTag' #-}
 inMaybeTag' tag arrOfs strOfs inParser = do
     vecWrite vec arrOfs 1#
     inOneTag' tag (arrOfs +# 1#) strOfs inParser >>= \\case
-        Just res -> return res
-        Nothing -> do
+        res@(ArrStrOfss arrOfs' _) ->
+          if I# arrOfs' < 0
+          then do
             updateFarthest tag strOfs
             #{vecWrite} vec arrOfs 0#
-            return $ ArrStrOfss (arrOfs +# 1#) strOfs
+            return $! ArrStrOfss (arrOfs +# 1#) strOfs
+          else return res
 {-# INLINE inManyTags #-}
 inManyTags tag arrOfs strOfs inParser = inManyTags' tag arrOfs strOfs inParser
 {-# INLINE inManyTagsWithAttrs #-}
@@ -377,20 +383,24 @@ inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs
 inManyTags' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
     (cnt, I# endArrOfs, I# endStrOfs) <- flip fix (0, I# (arrOfs +# 1#), I# strOfs) $ \\next (cnt, I# arrOfs', I# strOfs') ->
         inOneTag' tag arrOfs' strOfs' inParser >>= \\case
-            Just (ArrStrOfss arrOfs'' strOfs'') -> next   (cnt + 1, I# arrOfs'', I# strOfs'')
-            Nothing                   -> do
+            ArrStrOfss arrOfs'' strOfs'' ->
+              if I# arrOfs'' < 0
+              then do
                 updateFarthest tag strOfs
                 return (cnt,     I# arrOfs', I# strOfs')
+              else next   (cnt + 1, I# arrOfs'', I# strOfs'')
     #{vecWrite} vec arrOfs (unI# cnt)
     return $! ArrStrOfss endArrOfs endStrOfs
 {-# INLINE inManyTagsWithAttrs' #-}
 inManyTagsWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
     (cnt, I# endArrOfs, I# endStrOfs) <- flip fix (0, I# (arrOfs +# 1#), I# strOfs) $ \\next (cnt, I# arrOfs', I# strOfs') ->
         inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \\case
-            Just (ArrStrOfss arrOfs'' strOfs'') -> next   (cnt + 1, I# arrOfs'', I# strOfs'')
-            Nothing                   -> do
+            ArrStrOfss arrOfs'' strOfs'' ->
+              if I# arrOfs'' < 0
+              then do
                 updateFarthest tag strOfs
                 return (cnt,     I# arrOfs', I# strOfs')
+              else next   (cnt + 1, I# arrOfs'', I# strOfs'')
     #{vecWrite} vec arrOfs (unI# cnt)
     return $! ArrStrOfss endArrOfs endStrOfs
 
