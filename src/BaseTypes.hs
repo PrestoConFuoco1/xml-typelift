@@ -57,6 +57,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
               ,"Control.Monad.ST"
               ,"Control.Lens.TH"
               ,"qualified Data.STRef as STRef"
+              ,"qualified Data.STRef.Unboxed as STRef"
               ,"Data.ByteString (ByteString)"
               ,"Data.ByteString.Internal (ByteString (..))"
               -- ,"Debug.Trace"
@@ -80,6 +81,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
               ,"Control.Monad"
               ,"Control.Exception"
               ,"System.IO.Unsafe (unsafePerformIO)"
+              ,"GHC.Exts"
               ]
               ++ vectorModules
               ++ additionalBytestringModules
@@ -107,6 +109,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
       data SP = SP !Integer {-# UNPACK #-} !Int
       data WithTimezone a = WithTimezone { timezone :: Maybe TimeZone, value :: a }
         deriving (Show, G.Generic, NFData)
+      data ArrStrOfss = ArrStrOfss !Int# !Int#
       type XDateTime = WithTimezone LocalTime
       type XTime = WithTimezone TimeOfDay
       data ErrorContext = ErrorContext
@@ -145,8 +148,8 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
           "Invalid code generated: wrong alternative index for choice type '" <> BSC.unpack hsType <> "': " <> show consIdx
 
       {-# INLINE throwWithContext #-}
-      throwWithContext :: ByteString -> Int -> (ErrorContext -> XmlTypeliftException) -> b
-      throwWithContext totalInput bsOfs mkErr = throw $ mkErr $ ErrorContext bsOfs totalInput
+      throwWithContext :: ByteString -> Int# -> (ErrorContext -> XmlTypeliftException) -> b
+      throwWithContext totalInput bsOfs mkErr = throw $ mkErr $ ErrorContext (I# bsOfs) totalInput
 
       -- | Show error with context
       ppWithErrorContext :: ErrorContext -> String -> String
