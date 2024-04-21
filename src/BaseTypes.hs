@@ -80,6 +80,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
               ,"System.IO (hPutStrLn, stderr)"
               ,"Control.Monad"
               ,"Control.Exception"
+              ,"Data.Hashable"
               ,"System.IO.Unsafe (unsafePerformIO)"
               ,"GHC.Exts"
               ]

@@ -60,6 +60,7 @@ import Data.Char (isDigit, isUpper, toLower)
 import Data.Generics.Labels
 import Text.Interpolation.Nyan
 import Data.Coerce
+import Data.Hashable
 
 --import           Debug.Pretty.Simple
 --import           Text.Pretty.Simple
@@ -440,7 +441,7 @@ parseAttributes attrRouting strOfs (arrOfs :: Int#) = do
     let
       attrName = getAttrName ofs1
       ofsAttrContent = ofs1 +# unI# (BS.length attrName) +# 2#
-    I# attrContentEnd <- parseAttrContent (attrRouting arrOfs attrName) ofsAttrContent
+    I# attrContentEnd <- parseAttrContent (attrRouting arrOfs (unI# (hash attrName))) ofsAttrContent
     parseAttributes attrRouting (attrContentEnd +# 1#) arrOfs
 {-# INLINE parseTagWithAttrs #-}
 parseTagWithAttrs attrAlloc attrRouting expectedTag (arrOfs :: Int#) ofs
@@ -1020,8 +1021,9 @@ generateAttrsAllocation TypeWithAttrs{type_, giType} =
     emitInline routingName
     out1 [qc|{routingName} (ofs :: Int#) = \case|]
     withIndent1 $ do
-      forM_ (zip [0::Int, 2 .. ] $ NE.toList attrs) \(ofs, attr) ->
-        out1 [qc|"{attr}" -> ofs +# {ofs}#|]
+      forM_ (zip [0::Int, 2 .. ] $ NE.toList attrs) \(ofs, attr) -> do
+        let attrHash = hash attr
+        out1 [qc|x | I# x == hash ("{attr}" :: ByteString) -> ofs +# {ofs}#|]
       out1 [qc|_ -> (-1#)|]
   where
   withPresentAttrs action = case attrInfoFromGIType giType of

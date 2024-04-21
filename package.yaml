@@ -50,6 +50,7 @@ dependencies:
   - string-conversions
   - generic-lens
   - nyan-interpolation
+  - hashable
 
 flags:
   use-parser2:
