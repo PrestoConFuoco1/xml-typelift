@@ -381,28 +381,30 @@ inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs
 -- inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)
 {-# INLINE inManyTags' #-}
 inManyTags' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
-    (cnt, I# endArrOfs, I# endStrOfs) <- flip fix (0, I# (arrOfs +# 1#), I# strOfs) $ \\next (cnt, I# arrOfs', I# strOfs') ->
-        inOneTag' tag arrOfs' strOfs' inParser >>= \\case
+  go 0 (arrOfs +# 1#) strOfs
+  where
+    go cnt arrOfs' strOfs' =
+          inOneTag' tag arrOfs' strOfs' inParser >>= \\case
             ArrStrOfss arrOfs'' strOfs'' ->
               if I# arrOfs'' < 0
               then do
-                updateFarthest tag strOfs
-                return (cnt,     I# arrOfs', I# strOfs')
-              else next   (cnt + 1, I# arrOfs'', I# strOfs'')
-    #{vecWrite} vec arrOfs (unI# cnt)
-    return $! ArrStrOfss endArrOfs endStrOfs
+                updateFarthest tag strOfs'
+                #{vecWrite} vec arrOfs (unI# cnt)
+                return $! ArrStrOfss arrOfs' strOfs'
+              else go (cnt + 1) arrOfs'' strOfs''
 {-# INLINE inManyTagsWithAttrs' #-}
 inManyTagsWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
-    (cnt, I# endArrOfs, I# endStrOfs) <- flip fix (0, I# (arrOfs +# 1#), I# strOfs) $ \\next (cnt, I# arrOfs', I# strOfs') ->
-        inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \\case
+  go 0 (arrOfs +# 1#) strOfs
+  where
+    go cnt arrOfs' strOfs' =
+          inOneTagWithAttrs' attrAlloc attrRouting tag arrOfs' strOfs' inParser >>= \\case
             ArrStrOfss arrOfs'' strOfs'' ->
               if I# arrOfs'' < 0
               then do
-                updateFarthest tag strOfs
-                return (cnt,     I# arrOfs', I# strOfs')
-              else next   (cnt + 1, I# arrOfs'', I# strOfs'')
-    #{vecWrite} vec arrOfs (unI# cnt)
-    return $! ArrStrOfss endArrOfs endStrOfs
+                updateFarthest tag strOfs'
+                #{vecWrite} vec arrOfs (unI# cnt)
+                return $! ArrStrOfss arrOfs' strOfs'
+              else go (cnt + 1) arrOfs'' strOfs''
 
 {-# INLINE isGivenTagBeforeOffset #-}
 isGivenTagBeforeOffset expectedTag ofsToEnd =
