@@ -1080,7 +1080,9 @@ generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $ do
 generateChoiceExtractFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
   let chName = ch.typeName
-  out1 [qc|extract{chName}Content ofs = do|]
+  let extrFuncName = [qc|extract{chName}Content|] :: String
+  emitInline extrFuncName
+  out1 [qc|{extrFuncName} ofs = do|]
   withIndent1 do
     let vecIndex = "`vecIndex`" :: String
     out1 [qc|let altIdx = arr {vecIndex} ofs|]
@@ -1120,7 +1122,9 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
   let contentField = cgi.content.haskellName
   let attrNum = length cgi.attributes
   let consName = cgi.consName
-  out1 [qc|extract{recType}Content ofs =|]
+  let extrFuncName = [qc|extract{recType}Content|] :: String
+  emitInline extrFuncName
+  out1 [qc|{extrFuncName} ofs =|]
   withIndent1 $ do
     forM_ (zip cgi.attributes [1..attrNum]) $ \(attr, aIdx) ->
         out1 $ generateSingleAttrExtract recType attr aIdx
@@ -1752,10 +1756,14 @@ generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
   let typeName = ngi.typeName
       consName = ngi.consName
       wrappedName = ngi.wrappedType.type_
-  out1 [qc|{getParseRawFuncName typeName} =|]
+      rawFuncName = getParseRawFuncName typeName
+  emitInline rawFuncName
+  out1 [qc|{rawFuncName} =|]
   withIndent1 do
     out1 [qc|fmap {consName} . {getParseRawFuncName wrappedName}|]
-  out1 [qc|extract{typeName}Content ofs =|]
+  let extrFuncName = [qc|extract{typeName}Content|] :: String
+  emitInline extrFuncName
+  out1 [qc|{extrFuncName} ofs =|]
   withIndent1 do
     out1 [qc|fmap {consName} $ extract{wrappedName}Content ofs|]
 
@@ -1765,14 +1773,18 @@ getParseRawFuncName typeName = [qc|parse{typeName}Raw|]
 generateEnumExtractFunc :: EnumGI -> FunctionBody
 generateEnumExtractFunc en = FunctionBody $ runCodeWriter do
   let recType = en.typeName
-  out1 [qc|{getParseRawFuncName recType} = \case|]
+      funcName = getParseRawFuncName recType
+  emitInline funcName
+  out1 [qc|{funcName} = \case|]
   withIndent1 do
     for_ en.constrs \(xmlName, haskellCon) ->
       out1 [qc|"{xmlName}" -> pure {haskellCon}|]
     -- out1 [qc|unknown -> error $ "unknown enum value: " <> show unknown|]
     out1 [qc|unknown -> throw $ UnknownEnumValue "{recType}" unknown|]
 
-  out1 [qc|extract{recType}Content ofs =|]
+  let extractFuncName = [qc|extract{recType}Content|] :: String
+  emitInline extractFuncName
+  out1 [qc|{extractFuncName} ofs =|]
   withIndent1 do
     out1 [qc|extractAndParse {getParseRawFuncName recType} ofs|]
 
@@ -1781,7 +1793,9 @@ generateListExtractFunc lgi = FunctionBody $ runCodeWriter do
   let recType = lgi.typeName
       consName = lgi.consName
       baseType = lgi.itemType
-  out1 [qc|extract{recType}Content ofs =|]
+      funcName = [qc|extract{recType}Content|] :: String
+  emitInline funcName
+  out1 [qc|{funcName} ofs =|]
   withIndent1 do
     out1 [qc|fmap {consName} $ extractAndParse (traverse parse{baseType}Raw . BSC.words) ofs|]
 
