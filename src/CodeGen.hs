@@ -592,13 +592,15 @@ extractMaybe ofs subextr
 extractAttribute ofs subextr
   | arr `vecIndex` ofs == 0 = ExtractResult Nothing (ofs +# 2#)
   | otherwise                     = fmap Just (subextr ofs)
+
 {-# INLINE extractMany #-}
-extractMany ofs subextr = extractMany' (ofs +# 1#) (arr #{index} ofs)
+extractMany ofsInit subextr = extractMany' (ofsInit +# 1#) (arr `vecIndex` ofsInit) []
   where
-    extractMany' ofs 0   = ExtractResult [] ofs
-    extractMany' ofs len =
-      let ExtractResult v ofs' = subextr ofs
-      in fmap (v:) (extractMany' ofs' (len - 1))
+    extractMany' ofs 0   acc = ExtractResult (reverse acc) ofs
+    extractMany' ofs len acc =
+      let !(ExtractResult v ofs') = subextr ofs
+      in extractMany' ofs' (len - 1) (v : acc)
+
 {-# INLINE extractUnitContent #-}
 extractUnitContent ofs = ExtractResult () ofs
 {-# INLINE extractXMLStringContent #-}
