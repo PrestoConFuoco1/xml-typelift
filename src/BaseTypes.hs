@@ -113,10 +113,11 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
       emptyArrStrOfss :: ArrStrOfss
       emptyArrStrOfss = ArrStrOfss (-1#) (-1#)
       data ExtractResult a = ExtractResult a !Int#
-        deriving stock Functor
       {-# INLINE getExtractResult #-}
       getExtractResult :: ExtractResult a -> a
       getExtractResult (ExtractResult x _) = x
+      {-# INLINE mapExtr #-}
+      mapExtr f (ExtractResult x y) = ExtractResult (f x) y
       type XDateTime = WithTimezone LocalTime
       type XTime = WithTimezone TimeOfDay
       data ErrorContext = ErrorContext

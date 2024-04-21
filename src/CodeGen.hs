@@ -587,11 +587,11 @@ extractStringContent :: Int# -> ExtractResult ByteString
 {-# INLINE extractMaybe #-}
 extractMaybe ofs subextr
   | arr #{index} ofs == 0 = ExtractResult Nothing (ofs +# 1#)
-  | otherwise                     = fmap Just (subextr (ofs +# 1#))
+  | otherwise                     = mapExtr Just (subextr (ofs +# 1#))
 {-# INLINE extractAttribute #-}
 extractAttribute ofs subextr
   | arr `vecIndex` ofs == 0 = ExtractResult Nothing (ofs +# 2#)
-  | otherwise                     = fmap Just (subextr ofs)
+  | otherwise                     = mapExtr Just (subextr ofs)
 
 {-# INLINE extractMany #-}
 extractMany ofsInit subextr = extractMany' (ofsInit +# 1#) (arr `vecIndex` ofsInit) []
@@ -645,7 +645,7 @@ first f (a,b) = (,b) $! f a
 
 {-# INLINE extractAndParse #-}
 extractAndParse :: (ByteString -> Either String a) -> Int# -> ExtractResult a
-extractAndParse parser ofs = fmap (catchErr ofs parser) (extractStringContent ofs)
+extractAndParse parser ofs = mapExtr (catchErr ofs parser) (extractStringContent ofs)
 
 {-# INLINE catchErr #-}
 catchErr :: Int# -> (ByteString -> Either String b) -> ByteString -> b
@@ -1092,7 +1092,7 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((inTagInfo, _possibleFirstTags, cons_, type_), altIdx) -> do
       let typeName = type_.type_
       let extractor = getExtractorNameWithQuant "(ofs +# 1#)" inTagInfo typeName
-      out1 [qc|{altIdx} -> fmap {cons_} $ {extractor}|]
+      out1 [qc|{altIdx} -> mapExtr {cons_} $ {extractor}|]
     withIndent1 $ do
       out1 [qc|wrongIndex -> throw $ InternalErrorChoiceInvalidIndex wrongIndex "{chName}"|]
 
@@ -1108,7 +1108,7 @@ generateSingleAttrExtract recType attr aIdx = do
   let
     requiredModifier =
       if attrRequired
-      then [qc|fmap (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
+      then [qc|mapExtr (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
       else "" :: String
     finalExtractorType :: String =
       if attrRequired
@@ -1762,12 +1762,12 @@ generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
   emitInline rawFuncName
   out1 [qc|{rawFuncName} =|]
   withIndent1 do
-    out1 [qc|fmap {consName} . {getParseRawFuncName wrappedName}|]
+    out1 [qc|mapExtr {consName} . {getParseRawFuncName wrappedName}|]
   let extrFuncName = [qc|extract{typeName}Content|] :: String
   emitInline extrFuncName
   out1 [qc|{extrFuncName} ofs =|]
   withIndent1 do
-    out1 [qc|fmap {consName} $ extract{wrappedName}Content ofs|]
+    out1 [qc|mapExtr {consName} $ extract{wrappedName}Content ofs|]
 
 getParseRawFuncName :: HaskellTypeName -> String
 getParseRawFuncName typeName = [qc|parse{typeName}Raw|]
@@ -1799,7 +1799,7 @@ generateListExtractFunc lgi = FunctionBody $ runCodeWriter do
   emitInline funcName
   out1 [qc|{funcName} ofs =|]
   withIndent1 do
-    out1 [qc|fmap {consName} $ extractAndParse (traverse parse{baseType}Raw . BSC.words) ofs|]
+    out1 [qc|mapExtr {consName} $ extractAndParse (traverse parse{baseType}Raw . BSC.words) ofs|]
 
 registerGI :: GIType -> CG ()
 registerGI = \case
