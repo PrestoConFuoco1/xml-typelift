@@ -557,7 +557,7 @@ generateParserExtractTopLevel1 ::
 generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
     let topTypeName = topType.type_
     outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
-    outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = fst $ extract{topTypeName}Content 0|]
+    outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = getExtractResult $ extract{topTypeName}Content 0#|]
     withIndent $ do
         outCodeLine' "where"
         extractFuncs_ <- Lens.use extractFunctions
@@ -569,34 +569,38 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
         let
           extrStrBody =
             if isUnsafe then
-              [qc|extractStringContent ofs = (echoN "extractStringContent:result" 15 $ BSU.unsafeTake bslen (BSU.unsafeDrop bsofs bs), ofs + 2)|]
+              [qc|extractStringContent ofs = ExtractResult (BSU.unsafeTake bslen $ BSU.unsafeDrop bsofs bs) (ofs +# 2#)|]
             else
+              -- not working currently
               [qc|extractStringContent ofs = (BS.take bslen (BS.drop bsofs bs), ofs + 2)|]
 
         outCodeMultiLines [int|D|
+{-# INLINE vecIndex #-}
+vecIndex vec_ idx_ = vec_ `V.unsafeIndex` (I# idx_)
+
 {-# INLINE extractStringContent #-}
-extractStringContent :: Int -> (ByteString, Int)
+extractStringContent :: Int# -> ExtractResult ByteString
 #{extrStrBody :: String}
   where
-    bsofs = echo "extractStringContent:offset" $ arr #{index} ofs
-    bslen = echo "extractStringContent:length" $ arr #{index} (ofs + 1)
+    bsofs = arr #{index} ofs
+    bslen = arr #{index} (ofs +# 1#)
 {-# INLINE extractMaybe #-}
 extractMaybe ofs subextr
-  | arr #{index} ofs == 0 = (Nothing, ofs + 1)
-  | otherwise                     = first Just $ subextr (ofs + 1)
+  | arr #{index} ofs == 0 = ExtractResult Nothing (ofs +# 1#)
+  | otherwise                     = fmap Just (subextr (ofs +# 1#))
 {-# INLINE extractAttribute #-}
 extractAttribute ofs subextr
-  | arr `V.unsafeIndex` ofs == 0 = (Nothing, ofs + 2)
-  | otherwise                     = first Just $ subextr ofs
+  | arr `vecIndex` ofs == 0 = ExtractResult Nothing (ofs +# 2#)
+  | otherwise                     = fmap Just (subextr ofs)
 {-# INLINE extractMany #-}
-extractMany ofs subextr = extractMany' (ofs + 1) (arr #{index} ofs)
+extractMany ofs subextr = extractMany' (ofs +# 1#) (arr #{index} ofs)
   where
-    extractMany' ofs 0   = ([], ofs)
+    extractMany' ofs 0   = ExtractResult [] ofs
     extractMany' ofs len =
-      let (v, ofs') = subextr ofs
-      in first (v:) $ extractMany' ofs' (len - 1)
+      let ExtractResult v ofs' = subextr ofs
+      in fmap (v:) (extractMany' ofs' (len - 1))
 {-# INLINE extractUnitContent #-}
-extractUnitContent ofs = ((), ofs)
+extractUnitContent ofs = ExtractResult () ofs
 {-# INLINE extractXMLStringContent #-}
 extractXMLStringContent = extractStringContent
 |]
@@ -620,7 +624,7 @@ extractXMLStringContent = extractStringContent
           outCodeLine' $ mkCustomParseRawBody t p
         for_ (typesUsingCustomParsers <> map fst typesUsingCustomShortParsers) \t -> do
           outCodeLine' [int||{-# INLINE extract#{t}Content #-}|]
-          outCodeLine' [int||extract#{t}Content :: Int -> (#{t}, Int)|]
+          outCodeLine' [int||extract#{t}Content :: Int# -> ExtractResult #{t}|]
           outCodeLine' [int||extract#{t}Content = extractAndParse parse#{t}Raw|]
 
         outCodeMultiLines [int|D|
@@ -636,12 +640,13 @@ parseBoolRaw = \\case
     unexp -> Left $ "unexpected bool value: " <> show unexp
 {-# INLINE first #-}
 first f (a,b) = (,b) $! f a
+
 {-# INLINE extractAndParse #-}
-extractAndParse :: (ByteString -> Either String a) -> Int -> (a, Int)
-extractAndParse parser ofs = first (catchErr ofs parser) $ extractStringContent ofs
+extractAndParse :: (ByteString -> Either String a) -> Int# -> ExtractResult a
+extractAndParse parser ofs = fmap (catchErr ofs parser) (extractStringContent ofs)
 
 {-# INLINE catchErr #-}
-catchErr :: Int -> (ByteString -> Either String b) -> ByteString -> b
+catchErr :: Int# -> (ByteString -> Either String b) -> ByteString -> b
 catchErr ofs f str = either (throwWithContext bs bsOfs . PrimitiveTypeParsingError str) id (f str)
   where !(I# bsOfs) = arr #{index} ofs
 
@@ -803,9 +808,10 @@ parseIntegerRaw bsInp = runFlatparser bsInp do
   pure $ fromIntegral coefSign * n
 
 |]
+    index = "`vecIndex`" :: String
 
-    index | isUnsafe  = "`V.unsafeIndex`" :: String
-          | otherwise = "V.!"
+    --index | isUnsafe  = "`V.unsafeIndex`" :: String
+      --    | otherwise = "V.!"
 
 
 generateAuxiliaryFunctions :: CG ()
@@ -1076,13 +1082,13 @@ generateChoiceExtractFunctionBody ch = FunctionBody $ runCodeWriter do
   let chName = ch.typeName
   out1 [qc|extract{chName}Content ofs = do|]
   withIndent1 do
-    let vecIndex = "`V.unsafeIndex`" :: String
+    let vecIndex = "`vecIndex`" :: String
     out1 [qc|let altIdx = arr {vecIndex} ofs|]
     out1 [qc|case altIdx of|]
     withIndent1 $ forM_ (zip ch.alts [0 :: Int ..]) \((inTagInfo, _possibleFirstTags, cons_, type_), altIdx) -> do
       let typeName = type_.type_
-      let extractor = getExtractorNameWithQuant "(ofs + 1)" inTagInfo typeName
-      out1 [qc|{altIdx} -> first {cons_} $ {extractor}|]
+      let extractor = getExtractorNameWithQuant "(ofs +# 1#)" inTagInfo typeName
+      out1 [qc|{altIdx} -> fmap {cons_} $ {extractor}|]
     withIndent1 $ do
       out1 [qc|wrongIndex -> throw $ InternalErrorChoiceInvalidIndex wrongIndex "{chName}"|]
 
@@ -1098,10 +1104,14 @@ generateSingleAttrExtract recType attr aIdx = do
   let
     requiredModifier =
       if attrRequired
-      then [qc|first (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
+      then [qc|fmap (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
       else "" :: String
+    finalExtractorType :: String =
+      if attrRequired
+      then [qc|ExtractResult {haskellTypeName}|]
+      else [qc|ExtractResult (Maybe {haskellTypeName})|]
 
-  [qc|let (!{haskellAttrName}, !ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content in|]
+  [qc|let !(ExtractResult {haskellAttrName} ofs{aIdx}) = {requiredModifier}extractAttribute {oldOfs} extract{haskellTypeName}Content :: {finalExtractorType} in|]
 
 generateAttrContentExtract :: ContentWithAttrsGI -> FunctionBody
 generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
@@ -1114,14 +1124,16 @@ generateAttrContentExtract cgi = FunctionBody $ runCodeWriter do
   withIndent1 $ do
     forM_ (zip cgi.attributes [1..attrNum]) $ \(attr, aIdx) ->
         out1 $ generateSingleAttrExtract recType attr aIdx
-    out1 [qc|let (!{contentField}, !ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} in|]
-    out1 [qc|({consName}\{..}, ofs{attrNum + 1})|]
+    out1 [qc|let !(ExtractResult {contentField} ofs{attrNum + 1}) = extract{baseType}Content ofs{attrNum} :: ExtractResult {baseType} in|]
+    out1 [qc|ExtractResult {consName}\{..} ofs{attrNum + 1}|]
 
 generateSequenceExtractFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
   let recType = s.typeName
   let attrNum = length s.attributes
-  out1 [qc|extract{recType}Content ofs =|]
+  let extractorFuncName = [qc|extract{recType}Content|] :: String
+  emitInline extractorFuncName
+  out1 [qc|{extractorFuncName} ofs =|]
   withIndent1 $ do
       attrFields <- forM (zip s.attributes [1..attrNum]) $ \(attr, aIdx) -> do
         out1 $ generateSingleAttrExtract recType attr aIdx
@@ -1129,16 +1141,18 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
       properFields <- forM (zip s.fields [(attrNum + 1)..]) $ \(fld, ofsIdx::Int) -> do
               let ofs = if ofsIdx == 1 then ("ofs"::XMLString) else [qc|ofs{ofsIdx - 1}|]
                   fieldName = fld.haskellName
-                  extractor = getExtractorNameWithQuant ofs fld.inTagInfo fld.typeName.type_
-              out1 [qc|let (!{fieldName}, !ofs{ofsIdx}) = {extractor} in|]
+                  fieldTypeName = fld.typeName.type_
+                  extractor = getExtractorNameWithQuant ofs fld.inTagInfo fieldTypeName
+                  extractorType = mkTypeWithCardinality True fld.inTagInfo [qc|{fieldTypeName}|]
+              out1 [qc|let !(ExtractResult {fieldName} ofs{ofsIdx}) = {extractor} :: ExtractResult {extractorType} in|]
               return fieldName
       let fields = attrFields ++ properFields
           ofs' = if null fields then "ofs" else [qc|ofs{length fields}|]::XMLString
           haskellConsName = s.consName
       case fields of
-          []         -> out1 [qc|({haskellConsName}, {ofs'})|]
-          [oneField] -> out1 [qc|({haskellConsName} {oneField}, {ofs'})|]
-          _          -> out1 [qc|({haskellConsName}\{..}, {ofs'})|]
+          []         -> out1 [qc|ExtractResult {haskellConsName} {ofs'}|]
+          [oneField] -> out1 [qc|ExtractResult ({haskellConsName} {oneField}) {ofs'}|]
+          _          -> out1 [qc|ExtractResult ({haskellConsName}\{..}) {ofs'}|]
 
 getExtractorNameWithQuant :: XMLString -> Maybe (XMLString, Repeatedness) -> HaskellTypeName -> XMLString -- ? Builder
 getExtractorNameWithQuant ofs inTagInfo fieldTypeName = do
@@ -1743,7 +1757,7 @@ generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
     out1 [qc|fmap {consName} . {getParseRawFuncName wrappedName}|]
   out1 [qc|extract{typeName}Content ofs =|]
   withIndent1 do
-    out1 [qc|first {consName} $ extract{wrappedName}Content ofs|]
+    out1 [qc|fmap {consName} $ extract{wrappedName}Content ofs|]
 
 getParseRawFuncName :: HaskellTypeName -> String
 getParseRawFuncName typeName = [qc|parse{typeName}Raw|]
@@ -1767,9 +1781,9 @@ generateListExtractFunc lgi = FunctionBody $ runCodeWriter do
   let recType = lgi.typeName
       consName = lgi.consName
       baseType = lgi.itemType
-  out1 [qc|extract{recType}Content =|]
+  out1 [qc|extract{recType}Content ofs =|]
   withIndent1 do
-    out1 [qc|first {consName} . extractAndParse (traverse parse{baseType}Raw . BSC.words)|]
+    out1 [qc|fmap {consName} $ extractAndParse (traverse parse{baseType}Raw . BSC.words) ofs|]
 
 registerGI :: GIType -> CG ()
 registerGI = \case
@@ -1838,6 +1852,7 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE Strict #-}"
     outCodeLine "{-# LANGUAGE BangPatterns #-}"
     outCodeLine "{-# LANGUAGE NamedFieldPuns #-}"
+    outCodeLine "{-# LANGUAGE DeriveFunctor #-}"
     outCodeLine ""
     outCodeLine "module XMLSchema where"
     outCodeLine (basePrologue isUnsafe)
