@@ -321,10 +321,11 @@ inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) i
             let ofs'' = skipToOpenTag strOfs
             if bs `bsIndex` (ofs'' +# 1#) == slashChar then do
                 case ensureTag False tag (ofs'' +# 2#) of
-                    Nothing     -> do
+                  EnsureTagResult ofs''' _
+                    | I# ofs''' < 0 -> do
                         updateFarthest tag tagStrOfs
                         return emptyArrStrOfss
-                    Just (I# ofs''', _) -> pure $ ArrStrOfss arrOfs ofs'''
+                    | otherwise -> pure $ ArrStrOfss arrOfs ofs'''
             else do
                 return emptyArrStrOfss
         -- FIXME: поддержка пустых типов данных
@@ -333,21 +334,23 @@ inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) i
 inOneTag' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
     let tagOfs = skipToOpenTag strOfs +# 1#
     case ensureTag True tag tagOfs of
-        Nothing -> do
+      EnsureTagResult ofs' isOpenTagEmpty
+        | I# ofs' < 0 -> do
             updateFarthest tag tagOfs
             return emptyArrStrOfss
-        Just (I# ofs', True) -> do
+        | isOpenTagEmpty -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs (ofs' -# 1#) -- TODO points to special unparseable place
             return $ ArrStrOfss arrOfs ofs'
-        Just (I# ofs', _) -> do
+        | otherwise -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs ofs'
             let ofs'' = skipToOpenTag strOfs
             if bs `#{bsIndex}` (ofs'' +# 1#) == slashChar then do
                 case ensureTag False tag (ofs'' +# 2#) of
-                    Nothing     -> do
+                  EnsureTagResult ofs''' _
+                    | I# ofs''' < 0 -> do
                         updateFarthest tag tagOfs
                         return emptyArrStrOfss
-                    Just (I# ofs''', _) -> return $ ArrStrOfss arrOfs ofs'''
+                    | otherwise -> return $ ArrStrOfss arrOfs ofs'''
             else do
                 return emptyArrStrOfss
         -- ~~~~~~~~
@@ -418,18 +421,18 @@ isGivenTagBeforeOffset expectedTag ofsToEnd =
 ensureTag True expectedTag ofs
   | isGivenTagBeforeOffset expectedTag ofsToEnd =
       if bs `#{bsIndex}` ofsToEnd == closeTagChar
-        then Just (I# (ofsToEnd +# 1#), False)
+        then EnsureTagResult (ofsToEnd +# 1#) False
       else
         let ofs' = skipToCloseTag (ofs +# unI# (BS.length expectedTag))
-         in Just (I# (ofs' +# 1#), bs `#{bsIndex}` (ofs' -# 1#) == slashChar)
-  | otherwise = Nothing
+         in EnsureTagResult (ofs' +# 1#) (bs `#{bsIndex}` (ofs' -# 1#) == slashChar)
+  | otherwise = emptyEnsureTagResult
   where
     ofsToEnd = getAfterTagOffset ofs
 ensureTag False expectedTag ofs
   | isGivenTagBeforeOffset expectedTag ofsToEnd
-        = Just (I# (ofsToEnd +# 1#), False)
+        = EnsureTagResult (ofsToEnd +# 1#) False
   | otherwise
-        = Nothing
+        = emptyEnsureTagResult
   where
     ofsToEnd = getAfterTagOffset ofs
 parseAttributes attrRouting strOfs (arrOfs :: Int#) = do
