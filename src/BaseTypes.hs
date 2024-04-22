@@ -124,6 +124,9 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
       data EnsureTagResult = EnsureTagResult !Int# Bool
       emptyEnsureTagResult :: EnsureTagResult
       emptyEnsureTagResult = EnsureTagResult (-1#) False
+      data EnsureAttrTagResult = EnsureAttrTagResult !Int# !Int# Bool
+      emptyEnsureAttrTagResult :: EnsureAttrTagResult
+      emptyEnsureAttrTagResult = EnsureAttrTagResult (-1#) (-1#) False
       data ExtractResult a = ExtractResult a !Int#
       {-# INLINE getExtractResult #-}
       getExtractResult :: ExtractResult a -> a

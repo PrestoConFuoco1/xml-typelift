@@ -310,13 +310,14 @@ inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) i
     let tagStrOfs = skipToOpenTag strOfs +# 1#
     q <- parseTagWithAttrs attrAlloc attrRouting tag arrOfs tagStrOfs
     case q of
-        Nothing -> do
+      EnsureAttrTagResult ofs' arrOfs' isOpenTagEmpty
+        | I# ofs' < 0 -> do
             updateFarthest tag tagStrOfs
             return emptyArrStrOfss
-        Just ((I# ofs', I# arrOfs'), True) -> do
+        | isOpenTagEmpty -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs' (ofs' -# 1#)
             return $ ArrStrOfss arrOfs ofs'
-        Just ((I# ofs', I# arrOfs'), False) -> do
+        | otherwise -> do
             !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs' ofs'
             let ofs'' = skipToOpenTag strOfs
             if bs `bsIndex` (ofs'' +# 1#) == slashChar then do
@@ -449,15 +450,15 @@ parseAttributes attrRouting strOfs (arrOfs :: Int#) = do
 {-# INLINE parseTagWithAttrs #-}
 parseTagWithAttrs attrAlloc attrRouting expectedTag (arrOfs :: Int#) ofs
   | isGivenTagBeforeOffset expectedTag ofsToEnd = do
-      arrOfsAfterAttrs <- attrAlloc arrOfs
+      I# arrOfsAfterAttrs <- attrAlloc arrOfs
       if bs `bsIndex` ofsToEnd == closeTagChar
-        then pure $ Just ((I# (ofsToEnd +# 1#), arrOfsAfterAttrs), False)
+        then pure $ EnsureAttrTagResult (ofsToEnd +# 1#) arrOfsAfterAttrs False
       else do
         parseAttributes attrRouting ofsToEnd arrOfs
         I# strOfsAfterAttrs <- STRef.readSTRefU parseAttrsResultRef
         let ofs' = skipToCloseTag strOfsAfterAttrs
-        pure $ Just ((I# (ofs' +# 1#), arrOfsAfterAttrs), bs `bsIndex` (ofs' -# 1#) == slashChar)
-  | otherwise = pure Nothing
+        pure $ EnsureAttrTagResult (ofs' +# 1#) arrOfsAfterAttrs (bs `bsIndex` (ofs' -# 1#) == slashChar)
+  | otherwise = pure emptyEnsureAttrTagResult
   where
     ofsToEnd = getAfterTagOffset ofs
 
