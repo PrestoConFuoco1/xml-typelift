@@ -587,15 +587,18 @@ extractStringContent :: Int# -> ExtractResult ByteString
     bsofs = arr #{index} ofs
     bslen = arr #{index} (ofs +# 1#)
 {-# INLINE extractMaybe #-}
+extractMaybe :: Int# -> (Int# -> ExtractResult a) -> ExtractResult (Maybe a)
 extractMaybe ofs subextr
   | arr #{index} ofs == 0 = ExtractResult Nothing (ofs +# 1#)
   | otherwise                     = mapExtr Just (subextr (ofs +# 1#))
 {-# INLINE extractAttribute #-}
+extractAttribute :: Int# -> (Int# -> ExtractResult a) -> ExtractResult (Maybe a)
 extractAttribute ofs subextr
   | arr `vecIndex` ofs == 0 = ExtractResult Nothing (ofs +# 2#)
   | otherwise                     = mapExtr Just (subextr ofs)
 
 {-# INLINE extractMany #-}
+extractMany :: Int# -> (Int# -> ExtractResult a) -> ExtractResult [a]
 extractMany ofsInit subextr = extractMany' (ofsInit +# 1#) (arr `vecIndex` ofsInit) []
   where
     extractMany' ofs 0   acc = ExtractResult (reverse acc) ofs
@@ -604,6 +607,7 @@ extractMany ofsInit subextr = extractMany' (ofsInit +# 1#) (arr `vecIndex` ofsIn
       in extractMany' ofs' (len - 1) (v : acc)
 
 {-# INLINE extractUnitContent #-}
+extractUnitContent :: Int# -> ExtractResult ()
 extractUnitContent ofs = ExtractResult () ofs
 {-# INLINE extractXMLStringContent #-}
 extractXMLStringContent = extractStringContent
@@ -642,8 +646,6 @@ parseBoolRaw = \\case
     "false"-> Right False
     "0" -> Right False
     unexp -> Left $ "unexpected bool value: " <> show unexp
-{-# INLINE first #-}
-first f (a,b) = (,b) $! f a
 
 {-# INLINE extractAndParse #-}
 extractAndParse :: (ByteString -> Either String a) -> Int# -> ExtractResult a
