@@ -182,7 +182,6 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
       outCodeLine ""
       outCodeLine ""
       generateParserTop
-      generateAuxiliaryFunctions
       when isGenerateMainFunction $ generateMainFunction opts
 
 generateParserInternalStructures :: CG ()
@@ -218,7 +217,6 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         outCodeLine' [qc|parseAttrsResultRef <- STRef.newSTRefU (0 :: Int)|]
         outCodeLine' [qc|let|]
         withIndent $ do
-            --outCodeLine' [qc|parse{topName} :: forall s . UMV.STVector s Int -> ST s ()|]
             outCodeLine' [qc|parse{topName} vec = do|]
             withIndent $ do
                 outCodeLine' [qc|{vecWrite} vec 0# 0#|]
@@ -296,9 +294,11 @@ getAfterTagOffset strOfs =
   then getAfterTagOffset (strOfs +# 1#)
   else strOfs
 
+{-
 {-# INLINE getAttrName #-}
 getAttrName :: Int# -> XMLString
 getAttrName strOfs = BS.takeWhile (/= eqChar) $ BS.drop (I# strOfs) bs
+-}
 
 {-# INLINE inOneTag #-}
 inOneTag          tag arrOfs strOfs inParser = toError tag strOfs $ inOneTag' tag arrOfs strOfs inParser
@@ -329,8 +329,6 @@ inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) i
                     | otherwise -> pure $ ArrStrOfss arrOfs ofs'''
             else do
                 return emptyArrStrOfss
-        -- FIXME: поддержка пустых типов данных
-        -- https://stackoverflow.com/questions/7231902/self-closing-tags-in-xml-files
 {-# INLINE inOneTag' #-}
 inOneTag' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
     let tagOfs = skipToOpenTag strOfs +# 1#
@@ -354,7 +352,6 @@ inOneTag' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
                     | otherwise -> return $ ArrStrOfss arrOfs ofs'''
             else do
                 return emptyArrStrOfss
-        -- ~~~~~~~~
 {-# INLINE inMaybeTag #-}
 inMaybeTag tag arrOfs strOfs inParser = inMaybeTag' tag arrOfs strOfs inParser
 {-# INLINE inMaybeTagWithAttrs #-}
@@ -385,7 +382,6 @@ inMaybeTag' tag arrOfs strOfs inParser = do
 inManyTags tag arrOfs strOfs inParser = inManyTags' tag arrOfs strOfs inParser
 {-# INLINE inManyTagsWithAttrs #-}
 inManyTagsWithAttrs tag arrOfs strOfs inParser = inManyTagsWithAttrs' tag arrOfs strOfs inParser
--- inManyTags' :: Bool -> ByteString -> Int -> Int -> (Int -> Int -> ST s (Int, Int)) -> ST s (Int, Int)
 {-# INLINE inManyTags' #-}
 inManyTags' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
   go 0 (arrOfs +# 1#) strOfs
@@ -480,10 +476,6 @@ updateFarthest tag tagOfs = do
   when (I# tagOfs > f) $ do
     STRef.writeSTRefU farthest (I# tagOfs)
     STRef.writeSTRef farthestTag tag
-{-# INLINE substr #-}
-substr :: ByteString -> Int -> Int -> ByteString
-substr bs ofs len = BS.take len $ BS.drop ofs bs -- TODO replace with UNSAFE?
--- parseString :: Int -> Int -> ST s (Int, Int)
 {-# INLINE parseXMLStringContent #-}
 parseXMLStringContent = parseString
 {-# INLINE parseAttrContent #-}
@@ -550,7 +542,7 @@ skipToCloseTag ofs
   | bs `#{bsIndex}` ofs == closeTagChar = ofs
   | otherwise = skipToCloseTag (ofs +# 1#)
 skipToOpenTag :: Int# -> Int#
-skipToOpenTag ofs -- TODO with `takeWhile`
+skipToOpenTag ofs -- TODO: try to do this using memchr (elemIndex)
   | bs `#{bsIndex}` ofs == openTagChar = ofs
   | otherwise = skipToOpenTag (ofs +# 1#)
 skipTo :: Word8 -> Int# -> Int#
@@ -825,29 +817,6 @@ parseIntegerRaw bsInp = runFlatparser bsInp do
     --index | isUnsafe  = "`V.unsafeIndex`" :: String
       --    | otherwise = "V.!"
 
-
-generateAuxiliaryFunctions :: CG ()
-generateAuxiliaryFunctions = do
-    outCodeLine' ""
-    outCodeLine' ""
-    outCodeLine' [qc|trace = \_ -> id|]
-    outCodeLine' "{-# INLINE trace #-}"
-
-{-
-    outCodeLine' [qc|echo = \_ -> id|]
-    outCodeLine' [qc|echoN = \_ _ -> id|]
--}
-    outCodeLine' [qc|echo :: Show a => String -> a -> a|]
-    outCodeLine' [qc|echo msg x = x -- (msg <> ": " <> show x) `trace` x|]
-    outCodeLine' "{-# INLINE echo #-}"
-    outCodeLine' ""
-    outCodeLine' [qc|echoN :: Show a => String -> Int -> a -> a|]
-    outCodeLine' [qc|echoN msg n x = x -- (msg <> ": " <> take n (show x)) `trace` x|]
-    outCodeLine' "{-# INLINE echoN #-}"
-    outCodeLine' ""
-    outCodeLine' [qc|parseError :: Int -> ByteString -> String -> a|]
-    outCodeLine' [qc|parseError offset input msg = error $ ppWithErrorContext ErrorContext\{offset, input} msg|]
-    outCodeLine' ""
 
 generateParserTop :: CG ()
 generateParserTop = do
