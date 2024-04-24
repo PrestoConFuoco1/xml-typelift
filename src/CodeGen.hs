@@ -967,8 +967,9 @@ generateSequenceParseFunctionBody :: SequenceGI -> FunctionBody
 generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
   generateAttrsAllocation
     TypeWithAttrs { type_ = s.typeName, giType = GSeq s }
-  let funcName = getParserNameForType s.typeName
-  emitInline funcName
+  -- let funcName = getParserNameForType s.typeName
+  -- emitInline funcName
+  -- -- otherwise the generated module will never compile
   out1 (getParserNameForType s.typeName <> " arrStart strStart = do")
   withIndent1 do
     let (arrStart, strStart) = ("arrStart", "strStart")
@@ -1043,7 +1044,8 @@ getAttrsAllocatorName t = [qc|allocate{t}Attrs|]
 generateChoiceParseFunctionBody :: ChoiceGI -> FunctionBody
 generateChoiceParseFunctionBody ch = FunctionBody $ runCodeWriter $ do
   let funcName = getParserNameForType ch.typeName
-  emitInline funcName
+  -- emitInline funcName
+  -- -- otherwise the generated module will never compile
   out1 (funcName <> " arrStart strStart = do") >> withIndent1 do
     out1 [qc|let tagName = getTagName strStart|]
     out1 [qc|case tagName of|]
