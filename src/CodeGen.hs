@@ -1744,7 +1744,7 @@ generateNewtypeExtractFunc ngi = FunctionBody $ runCodeWriter do
   emitInline rawFuncName
   out1 [qc|{rawFuncName} =|]
   withIndent1 do
-    out1 [qc|mapExtr {consName} . {getParseRawFuncName wrappedName}|]
+    out1 [qc|fmap {consName} . {getParseRawFuncName wrappedName}|]
   let extrFuncName = [qc|extract{typeName}Content|] :: String
   emitInline extrFuncName
   out1 [qc|{extrFuncName} ofs =|]
