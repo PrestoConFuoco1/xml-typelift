@@ -248,8 +248,14 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         -- TODO read this from file!
         --
       outCodeMultiLines [int|D|
+
+lastBsIndex = BS.length bs - 1
+
 {-# INLINE bsIndex #-}
-bsIndex bs_ ix_ = bs_ `BSU.unsafeIndex` (I# ix_)
+bsIndex bs_ ix_
+  | I# ix_ < 0 = throw $ InvalidIndex (I# ix_) bs
+  | I# ix_ > lastBsIndex = throw $ InvalidIndex (I# ix_) bs
+  | otherwise = bs_ `BSU.unsafeIndex` (I# ix_)
 
 {-# INLINE vecWrite #-}
 vecWrite vec arrOfs n = V.unsafeWrite vec (I# arrOfs) (I# n)

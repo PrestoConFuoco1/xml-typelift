@@ -131,6 +131,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
         | RequiredAttributeMissing String String
         | UnknownEnumValue String XMLString
         | PrimitiveTypeParsingError XMLString String ErrorContext
+        | InvalidIndex Int ByteString
         | InternalErrorChoiceInvalidIndex Int XMLString
         deriving anyclass Exception
 
@@ -153,6 +154,14 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
         PrimitiveTypeParsingError unknownVal reason ctx ->
           ppWithErrorContext ctx $
             "Failed to parse value of primitive type; value: '" <> BSC.unpack unknownVal <> "', reason: '" <> reason <> "'"
+        InvalidIndex ix input -> do
+          let
+            mbInputPart =
+              if ix < 0
+              then Nothing
+              else Just $
+                " last 100 characters of input:\\n'" <> BSC.unpack (BS.takeEnd 100 input) <> "'"
+          "Invalid index: " <> show ix <> ", probably the input is not a valid XML;" <> fromMaybe "" mbInputPart
         InternalErrorChoiceInvalidIndex consIdx hsType ->
           "Invalid code generated: wrong alternative index for choice type '" <> BSC.unpack hsType <> "': " <> show consIdx
 
