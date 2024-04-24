@@ -212,7 +212,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
     outCodeLine' [qc|parseTopLevelToArray :: ByteString -> TopLevelInternal|]
     outCodeLine' [qc|parseTopLevelToArray bs = TopLevelInternal bs $ V.create $ do|]
     withIndent $ do
-        outCodeLine' [qc|vec <- {vecNew} ((max 1 (BS.length bs `div` 7)) * 2)|] -- TODO add code to strip vector
+        outCodeLine' [qc|vec_ <- {vecNew} ((max 1 (BS.length bs `div` 7)) * 2)|] -- TODO add code to strip vector
         outCodeLine' [qc|farthest    <- STRef.newSTRefU 0 -- farthest index so far|]
         outCodeLine' [qc|farthestTag <- STRef.newSTRef ("<none>" :: ByteString)|]
         outCodeLine' [qc|parseAttrsResultRef <- STRef.newSTRefU (0 :: Int)|]
@@ -233,8 +233,8 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
                 withIndent $ do
                     mapM_ generateFunction parseFuncs_
                     generateAuxiliaryFunctionsIA
-        outCodeLine' [qc|parse{topName} vec|]
-        outCodeLine' [qc|return vec|]
+        outCodeLine' [qc|parse{topName} vec_|]
+        outCodeLine' [qc|return vec_|]
   where
     vecNew, vecWrite, bsIndex :: String
     vecNew   | isUnsafe  = "V.unsafeNew"
@@ -443,9 +443,14 @@ parseAttributes attrRouting strOfs (arrOfs :: Int#) = do
     then STRef.writeSTRefU parseAttrsResultRef (I# ofs1)
     else do
     let
-      attrName = getAttrName ofs1
-      ofsAttrContent = ofs1 +# unI# (BS.length attrName) +# 2#
-    I# attrContentEnd <- parseAttrContent (attrRouting arrOfs (unI# (hash attrName))) ofsAttrContent
+    --   attrName = getAttrName ofs1
+    --   ofsAttrContent = ofs1 +# unI# (BS.length attrName) +# 2#
+    -- I# attrContentEnd <- parseAttrContent (attrRouting arrOfs (unI# (hash attrName))) ofsAttrContent
+      afterAttrOffset = skipTo eqChar ofs1
+      attrLength = afterAttrOffset -# ofs1
+      ofsAttrContent = afterAttrOffset +# 2#
+      attrHash = unI# $ hash $ BSU.unsafeTake (I# attrLength) $ BSU.unsafeDrop (I# ofs1) bs
+    I# attrContentEnd <- parseAttrContent (attrRouting arrOfs attrHash) ofsAttrContent
     parseAttributes attrRouting (attrContentEnd +# 1#) arrOfs
 {-# INLINE parseTagWithAttrs #-}
 parseTagWithAttrs attrAlloc attrRouting expectedTag (arrOfs :: Int#) ofs

@@ -36,43 +36,29 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
     makeImport modPath = "import " <> modPath <> "\n"
     modules = ["Data.Maybe"
               ,"Data.Fixed(Fixed(..))"
-              ,"Data.Time.LocalTime(ZonedTime (..), TimeOfDay (..), LocalTime (..), TimeZone (..), utc, minutesToTimeZone)"
-              ,"Data.Time.Format.ISO8601(iso8601ParseM)"
+              ,"Data.Time.LocalTime(TimeOfDay (..), LocalTime (..), TimeZone (..), utc, minutesToTimeZone)"
               ,"Data.Int(Int64)"
               ,if isUnsafe
                then "Data.Scientific (Scientific, scientific)"
                else "Data.Scientific.Safe (Scientific, scientific)"
               ,"Data.Time.ISO8601.Duration"
-              -- ,"FromXML"
-              -- ,"Errors"
               ,"qualified Data.Char"
               ,"qualified FlatParse.Basic as FP"
-              ,"Data.Time.Calendar(Day, Year, MonthOfYear, toGregorian, fromGregorian)"
+              ,"Data.Time.Calendar(Day, Year, MonthOfYear, fromGregorian)"
               ,"Data.Time.Calendar.Month"
-              ,"Data.Time.Clock"
-              -- TODO check imports:
               ,"Control.DeepSeq"
               ,"Control.Applicative"
-              ,"Control.Monad.Fix"
               ,"Control.Monad.ST"
-              ,"Control.Lens.TH"
+              ,"Control.Lens.TH (makePrisms, makeLenses)"
               ,"qualified Data.STRef as STRef"
               ,"qualified Data.STRef.Unboxed as STRef"
               ,"Data.ByteString (ByteString)"
-              ,"Data.ByteString.Internal (ByteString (..))"
-              -- ,"Debug.Trace"
-              -- ,"Data.Char"
-              ,"Data.Functor.Identity"
-              ,"Data.Time.Format"
-              ,"Data.Time.LocalTime(ZonedTime)"
               ,"Data.Semigroup hiding (Product)"
               ,"Data.Word"
               ,"qualified GHC.Generics as G"
               ,"qualified Data.ByteString as BS"
-              ,"qualified Data.ByteString.Char8 as BSC" -- TODO resolve with previous import
-              -- TODO
+              ,"qualified Data.ByteString.Char8 as BSC"
               ,"Data.Either"
-              -- TODO only when `isMainGenerate`
               ,"Data.List"
               ,"Prelude hiding (fail)"
               ,"System.Environment (getArgs)"
@@ -80,7 +66,6 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
               ,"System.IO (hPutStrLn, stderr)"
               ,"Control.Monad"
               ,"Control.Exception"
-              -- ,"Data.Hashable"
               ,"System.IO.Unsafe (unsafePerformIO)"
               ,"GHC.Exts"
               ]
@@ -132,6 +117,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
       getExtractResult :: ExtractResult a -> a
       getExtractResult (ExtractResult x _) = x
       {-# INLINE mapExtr #-}
+      mapExtr :: (t -> a) -> ExtractResult t -> ExtractResult a
       mapExtr f (ExtractResult x y) = ExtractResult (f x) y
       type XDateTime = WithTimezone LocalTime
       type XTime = WithTimezone TimeOfDay
