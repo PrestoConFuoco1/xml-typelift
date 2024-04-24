@@ -315,10 +315,10 @@ inOneTagWithAttrs' attrAlloc attrRouting tag (arrOfs :: Int#) (strOfs :: Int#) i
             updateFarthest tag tagStrOfs
             return emptyArrStrOfss
         | isOpenTagEmpty -> do
-            !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs' (ofs' -# 1#)
+            ArrStrOfss arrOfs strOfs <- inParser arrOfs' (ofs' -# 1#)
             return $ ArrStrOfss arrOfs ofs'
         | otherwise -> do
-            !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs' ofs'
+            ArrStrOfss arrOfs strOfs <- inParser arrOfs' ofs'
             let ofs'' = skipToOpenTag strOfs
             if bs `bsIndex` (ofs'' +# 1#) == slashChar then do
                 case ensureTag False tag (ofs'' +# 2#) of
@@ -340,10 +340,10 @@ inOneTag' tag (arrOfs :: Int#) (strOfs :: Int#) inParser = do
             updateFarthest tag tagOfs
             return emptyArrStrOfss
         | isOpenTagEmpty -> do
-            !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs (ofs' -# 1#) -- TODO points to special unparseable place
+            ArrStrOfss arrOfs strOfs <- inParser arrOfs (ofs' -# 1#) -- TODO points to special unparseable place
             return $ ArrStrOfss arrOfs ofs'
         | otherwise -> do
-            !(ArrStrOfss arrOfs strOfs) <- inParser arrOfs ofs'
+            ArrStrOfss arrOfs strOfs <- inParser arrOfs ofs'
             let ofs'' = skipToOpenTag strOfs
             if bs `#{bsIndex}` (ofs'' +# 1#) == slashChar then do
                 case ensureTag False tag (ofs'' +# 2#) of
@@ -1007,7 +1007,7 @@ generateSequenceParseFunctionBody s = FunctionBody $ runCodeWriter do
         ofsNames = zip ofsNames' (tail ofsNames')
         (arrRet, strRet) = ofsNames' !! length fields
     forM_ (zip ofsNames fields) $ \((oldOffsets, (arrOfs', strOfs')), field) -> do
-      out1 [qc|!(ArrStrOfss {arrOfs'} {strOfs'}) <- do|]
+      out1 [qc|ArrStrOfss {arrOfs'} {strOfs'} <- do|]
       withIndent1 do
         -- offsetsAfterAllocGen <- generateAttrsAllocation oldOffsets field.typeName
         out1 $ generateParseElementCall oldOffsets field.inTagInfo field.typeName
