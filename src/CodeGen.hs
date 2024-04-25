@@ -169,7 +169,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
       outCodeLine [qc||]
       outCodeLine [qc|type TopLevel = {type_ topNameProcessed}|]
       outCodeLine [qc|-- PARSER --|]
-      generateParserInternalStructures
+      generateParserInternalStructures opts
       generateParserInternalArray1 opts (theSelectedTop, topNameProcessed)
       outCodeLine ""
       outCodeLine ""
@@ -182,13 +182,18 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
       outCodeLine "-- parser --"
       outCodeLine ""
       outCodeLine ""
-      generateParserTop
+      generateParserTop opts
       when isGenerateMainFunction $ generateMainFunction opts
 
-generateParserInternalStructures :: CG ()
-generateParserInternalStructures = do
+generateParserInternalStructures :: GenerateOpts -> CG ()
+generateParserInternalStructures GenerateOpts{useManualVectorAlloc} = do
+    let 
+      vectorType =
+        if not useManualVectorAlloc
+        then "V.Vector Int" :: String
+        else "Ptr Int"
     outCodeLine [qc|-- | Internal representation of TopLevel|]
-    outCodeLine [qc|data TopLevelInternal = TopLevelInternal !ByteString !(V.Vector Int) deriving (G.Generic, NFData, Show)|] -- TODO qualify all imports to avoid name clush
+    outCodeLine [qc|data TopLevelInternal = TopLevelInternal !ByteString !({vectorType}) deriving (G.Generic, NFData, Show)|] -- TODO qualify all imports to avoid name clush
     outCodeLine ""
 
 eltToRepeatedness :: Element -> Repeatedness
@@ -201,7 +206,7 @@ eltToRepeatedness (Element m Unbounded     _ _ _ _ _) = RepNotLess m
 eltToRepeatedness (Element m (MaxOccurs n) _ _ _ _ _) = RepRange m n
 
 generateParserInternalArray1 :: GenerateOpts -> (Element, TypeWithAttrs) -> CG ()
-generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
+generateParserInternalArray1 GenerateOpts{isUnsafe, useManualVectorAlloc} (topEl, topType) = do
     outCodeLine [qc|-- PARSER --|]
     -- Generate parser header
     let topTag = eName topEl
@@ -209,10 +214,16 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
     when (minOccurs topEl /= 1) $ parseErrorBs topName [qc|Wrong minOccurs = {minOccurs topEl}|]
     when (maxOccurs topEl /= MaxOccurs 1) $ parseErrorBs topName [qc|Wrong maxOccurs = {maxOccurs topEl}|]
     let repeatedness = RepOnce
-    outCodeLine' [qc|parseTopLevelToArray :: ByteString -> TopLevelInternal|]
-    outCodeLine' [qc|parseTopLevelToArray bs = TopLevelInternal bs $ V.create $ do|]
+    if not useManualVectorAlloc
+      then do
+        outCodeLine' [qc|parseTopLevelToArray :: ByteString -> TopLevelInternal|]
+        outCodeLine' [qc|parseTopLevelToArray bs = TopLevelInternal bs $ V.create $ do|]
+      else do
+        outCodeLine' [qc|parseTopLevelToArray :: Ptr Int -> ByteString -> TopLevelInternal|]
+        outCodeLine' [qc|parseTopLevelToArray vec_ bs = TopLevelInternal bs $ runST $ do|]
     withIndent $ do
-        outCodeLine' [qc|vec_ <- {vecNew} ((max 1 (BS.length bs `div` 7)) * 2)|] -- TODO add code to strip vector
+        unless useManualVectorAlloc $
+          outCodeLine' [qc|vec_ <- {vecNew} ((max 1 (BS.length bs `div` 7)) * 2)|] -- TODO add code to strip vector
         outCodeLine' [qc|farthest    <- STRef.newSTRefU 0 -- farthest index so far|]
         outCodeLine' [qc|farthestTag <- STRef.newSTRef ("<none>" :: ByteString)|]
         outCodeLine' [qc|parseAttrsResultRef <- STRef.newSTRefU (0 :: Int)|]
@@ -248,6 +259,15 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
         --
         -- TODO read this from file!
         --
+      let
+        vecWriteBody =
+          if not useManualVectorAlloc
+          then "vecWrite vec arrOfs n = V.unsafeWrite vec (I# arrOfs) (I# n)" :: String
+          else
+            [int||
+            vecWrite :: Ptr Int -> Int# -> Int# -> ST s ()
+            vecWrite (Ptr vec) arrOfs n = ST \\s# -> (# writeIntOffAddr# vec arrOfs n s#, () #)
+            |]
       outCodeMultiLines [int|D|
 
 lastBsIndex = BS.length bs - 1
@@ -259,7 +279,7 @@ bsIndex bs_ ix_
   | otherwise = bs_ `BSU.unsafeIndex` (I# ix_)
 
 {-# INLINE vecWrite #-}
-vecWrite vec arrOfs n = V.unsafeWrite vec (I# arrOfs) (I# n)
+#{vecWriteBody}
 
 {-# INLINE unI# #-}
 unI# (I# n) = n
@@ -563,7 +583,7 @@ generateParserExtractTopLevel1 ::
   GenerateOpts ->
   TypeWithAttrs ->
   CG ()
-generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
+generateParserExtractTopLevel1 GenerateOpts{isUnsafe, useManualVectorAlloc} topType = do
     let topTypeName = topType.type_
     outCodeLine' [qc|extractTopLevel :: TopLevelInternal -> TopLevel|]
     outCodeLine' [qc|extractTopLevel (TopLevelInternal bs arr) = getExtractResult $ extract{topTypeName}Content 0#|]
@@ -583,9 +603,18 @@ generateParserExtractTopLevel1 GenerateOpts{isUnsafe} topType = do
               -- not working currently
               [qc|extractStringContent ofs = (BS.take bslen (BS.drop bsofs bs), ofs + 2)|]
 
+        let
+          vecIndexBody =
+            if not useManualVectorAlloc
+            then "vecIndex vec_ idx_ = vec_ `V.unsafeIndex` (I# idx_)" :: String
+            else
+              [int||
+              vecIndex :: Ptr Int -> Int# -> Int
+              vecIndex (Ptr vec_) idx_ = I# (indexIntOffAddr# vec_ idx_)
+              |]
         outCodeMultiLines [int|D|
 {-# INLINE vecIndex #-}
-vecIndex vec_ idx_ = vec_ `V.unsafeIndex` (I# idx_)
+#{vecIndexBody}
 
 {-# INLINE extractStringContent #-}
 extractStringContent :: Int# -> ExtractResult ByteString
@@ -841,10 +870,25 @@ parseIntegerRaw bsInp = runFlatparser bsInp do
       --    | otherwise = "V.!"
 
 
-generateParserTop :: CG ()
-generateParserTop = do
+generateParserTop :: GenerateOpts -> CG ()
+generateParserTop GenerateOpts{useManualVectorAlloc} = do
+  if not useManualVectorAlloc
+  then do
     outCodeLine "parse :: ByteString -> Either XmlTypeliftException TopLevel" -- TODO
     outCodeLine "parse bs = unsafePerformIO $ try $ evaluate $ extractTopLevel $ parseTopLevelToArray bs"
+  else do
+    outCodeMultiLines [int|D|
+withVec :: ByteString -> (Ptr Int -> IO a) -> IO a
+withVec bs action = do
+  let vecSize = max 1 (BS.length bs `div` 7) * 2
+      intSize = sizeOfType @Int
+  -- TODO: uninterruptibleMask for releasing action?
+  bracket (mallocBytes (vecSize * intSize)) free action
+
+parse :: ByteString -> Either XmlTypeliftException TopLevel
+parse bs = unsafePerformIO $ withVec bs \\vec -> try $ evaluate $ extractTopLevel $ parseTopLevelToArray vec bs
+  |]
+
 
 generateMainFunction :: HasCallStack => GenerateOpts -> CG ()
 generateMainFunction GenerateOpts{..} = trace "main" do
@@ -1927,7 +1971,7 @@ generateModuleHeading ::
   HasCallStack =>
   GenerateOpts ->
   CG ()
-generateModuleHeading GenerateOpts{..} = do
+generateModuleHeading opts@GenerateOpts{..} = do
     unless isUnsafe $ outCodeLine "{-# LANGUAGE Safe #-}"
     outCodeLine "{-# LANGUAGE DuplicateRecordFields #-}"
     outCodeLine "{-# LANGUAGE BlockArguments  #-}"
@@ -1948,9 +1992,10 @@ generateModuleHeading GenerateOpts{..} = do
     outCodeLine "{-# LANGUAGE BangPatterns #-}"
     outCodeLine "{-# LANGUAGE NamedFieldPuns #-}"
     outCodeLine "{-# LANGUAGE DeriveFunctor #-}"
+    outCodeLine "{-# LANGUAGE TypeApplications #-}"
     outCodeLine ""
     outCodeLine "module XMLSchema where"
-    outCodeLine (basePrologue isUnsafe)
+    outCodeLine (basePrologue useManualVectorAlloc isUnsafe)
 
 identity :: p -> p
 identity x = x

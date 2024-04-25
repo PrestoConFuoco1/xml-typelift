@@ -30,8 +30,8 @@ import           Schema
 import Text.Interpolation.Nyan
 
 -- | Module prologue to import all standard types
-basePrologue :: Bool -> String
-basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
+basePrologue :: Bool -> Bool -> String
+basePrologue useManualVectorAlloc isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
   where
     makeImport modPath = "import " <> modPath <> "\n"
     modules = ["Data.Maybe"
@@ -73,6 +73,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
               ++ additionalBytestringModules
               ++ xenoModules
               ++ prettyPrintModules
+              ++ manualAllocationModules
     vectorModules
       | isUnsafe  = ["qualified Data.Vector.Unboxed as V"
                     ,"qualified Data.Vector.Unboxed.Mutable as V"]
@@ -85,6 +86,13 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
       -- | otherwise = ["qualified Xeno.DOM.Safe as Xeno"]
     prettyPrintModules
       | isUnsafe  = [] -- "Text.Pretty.Simple"]
+      | otherwise = []
+    manualAllocationModules
+      | useManualVectorAlloc =
+        ["Foreign.Marshal.Alloc (mallocBytes, free)"
+        ,"Data.Primitive.Types (sizeOfType)"
+        ,"GHC.ST"
+        ]
       | otherwise = []
     baseTypes = [int||
       {-# INLINE hash #-}

@@ -325,6 +325,9 @@ newtype ShouldGenLenses = ShouldGenLenses Bool
 newtype AllowDuplicatedFields = AllowDuplicatedFields Bool
   deriving Show
 
+newtype UseManualVectorAlloc = UseManualVectorAlloc Bool
+  deriving Show
+
 -- | Options for generating
 data GenerateOpts = GenerateOpts
     { isGenerateMainFunction :: Bool
@@ -333,10 +336,11 @@ data GenerateOpts = GenerateOpts
     , useXmlIsogenNaming :: UseXmlIsogenNaming
     , shouldGenerateLenses :: ShouldGenLenses
     , allowDuplicatedFields :: AllowDuplicatedFields
+    , useManualVectorAlloc :: Bool
     } deriving Show
 
 instance Default GenerateOpts where
-    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False) (ShouldGenLenses False) (AllowDuplicatedFields False)
+    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False) (ShouldGenLenses False) (AllowDuplicatedFields False) False
 
 data Env = Env
   { genOpts :: GenerateOpts
