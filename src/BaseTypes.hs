@@ -133,6 +133,7 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
         | PrimitiveTypeParsingError XMLString String ErrorContext
         | InvalidIndex Int ByteString
         | InternalErrorChoiceInvalidIndex Int XMLString
+        | InternalErrorInvalidDefaultValue String XMLString
         deriving anyclass Exception
 
       instance Show XmlTypeliftException where
@@ -164,6 +165,8 @@ basePrologue isUnsafe = mconcat (map makeImport modules) <> "\n" <> baseTypes
           "Invalid index: " <> show ix <> ", probably the input is not a valid XML;" <> fromMaybe "" mbInputPart
         InternalErrorChoiceInvalidIndex consIdx hsType ->
           "Invalid code generated: wrong alternative index for choice type '" <> BSC.unpack hsType <> "': " <> show consIdx
+        InternalErrorInvalidDefaultValue hsType rawVal ->
+          "Failed to parse default value '" <> BSC.unpack rawVal <> "' of type " <> hsType <> "; either the schema default value or the parser are invalid"
 
       {-# INLINE throwWithContext #-}
       throwWithContext :: ByteString -> Int# -> (ErrorContext -> XmlTypeliftException) -> b

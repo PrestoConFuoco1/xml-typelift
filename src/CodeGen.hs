@@ -662,6 +662,13 @@ catchErr :: Int# -> (ByteString -> Either String b) -> ByteString -> b
 catchErr ofs f str = either (throwWithContext bs bsOfs . PrimitiveTypeParsingError str) id (f str)
   where !(I# bsOfs) = arr #{index} ofs
 
+-- TODO: this must be checked at compile time, but this requires placing
+-- raw parsing functions in a separate module
+{-# INLINE withDefault #-}
+withDefault :: String -> (XMLString -> Either String a) -> XMLString -> Maybe a -> a
+withDefault hsType parseRaw rawVal =
+  fromMaybe $ fromRight (throw $ InternalErrorInvalidDefaultValue hsType rawVal) $ parseRaw rawVal
+
 {-# INLINE runFlatparser #-}
 runFlatparser :: ByteString -> FP.Parser String a -> Either String a
 runFlatparser bsInp parser = fromFlatparseResult $ FP.runParser parser bsInp 
@@ -931,11 +938,11 @@ mkAttrFieldDeclaration fld =
   , TyType $ typeWithUse $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
   where
-  attrRequired = fld.attrUse == Required
+  attrMaybe = fld.attrUse == Optional
   typeWithUse x =
-    if attrRequired
-    then x
-    else "Maybe " <> x
+    if attrMaybe
+    then "Maybe " <> x
+    else x
 
 type CodeWriter' = ReaderT Int (Writer [String])
 type CodeWriter = CodeWriter' ()
@@ -1092,16 +1099,20 @@ generateSingleAttrExtract recType attr aIdx = do
   let haskellAttrName = attr.haskellName.unHaskellFieldName
   let haskellTypeName = attr.typeName.type_
   let
-    attrRequired = case attr.attrUse of
-      Required -> True
-      _ -> False
+    attrMaybe = case attr.attrUse of
+      Required -> False
+      Default{} -> False
+      Optional -> True
   let
     requiredModifier =
-      if attrRequired
-      then [qc|mapExtr (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
-      else "" :: String
+      case attr.attrUse of
+        Required ->
+          [qc|mapExtr (fromMaybe $ throw $ RequiredAttributeMissing "{haskellAttrName}" "{recType}") $ |]
+        Optional -> "" :: String
+        Default defaultRaw ->
+          [qc|mapExtr (withDefault "{haskellTypeName}" {getParseRawFuncName haskellTypeName} "{defaultRaw}") $ |]
     finalExtractorType :: String =
-      if attrRequired
+      if not attrMaybe
       then [qc|ExtractResult {haskellTypeName}|]
       else [qc|ExtractResult (Maybe {haskellTypeName})|]
 
