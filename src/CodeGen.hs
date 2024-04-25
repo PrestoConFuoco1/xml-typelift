@@ -1684,8 +1684,8 @@ processType quals (fmap (coerce stripDigitsSuffix) -> mbPossibleName) = \case
         enum_ = EnumGI {typeName, constrs}
       registerEnumGI enum_
       pure $ typeNoAttrs typeName $ GEnum enum_
-    Pattern{} -> lookupHaskellTypeBySchemaType quals base
-    None -> lookupHaskellTypeBySchemaType quals base
+    Pattern{} -> processUnknownRestriction base
+    None -> processUnknownRestriction base
   Extension{base, mixin} -> do
     baseHType <- lookupHaskellTypeBySchemaType quals base
     let possibleName = fromMaybe (XmlNameWN $ baseHType.type_.unHaskellTypeName <> "Ext") mbPossibleName
@@ -1703,9 +1703,12 @@ processType quals (fmap (coerce stripDigitsSuffix) -> mbPossibleName) = \case
     let listGI = ListGI {typeName, consName, itemType = itemType.type_}
     registerListGI listGI
     pure $ TypeWithAttrs typeName $ GList listGI
-{-
   where
-  processAsNewtype base = do
+  processUnknownRestriction base = do
+    genOpts <- asks genOpts
+    if not $ processUnknownRestrictionsWithNewtype genOpts
+    then lookupHaskellTypeBySchemaType quals base
+    else do
       let
         possibleName =
           fromMaybe (mkXmlNameWN $ base <> "Wrapper") mbPossibleName
@@ -1715,7 +1718,6 @@ processType quals (fmap (coerce stripDigitsSuffix) -> mbPossibleName) = \case
       let ngi = NewtypeGI {typeName, consName, wrappedType}
       registerNewtypeGI ngi
       pure $ typeNoAttrs typeName $ GWrapper ngi
--}
 
 attrInfoFromGIType :: GIType -> AttributesInfo
 attrInfoFromGIType = \case

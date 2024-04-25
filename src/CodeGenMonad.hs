@@ -331,16 +331,17 @@ newtype UseManualVectorAlloc = UseManualVectorAlloc Bool
 -- | Options for generating
 data GenerateOpts = GenerateOpts
     { isGenerateMainFunction :: Bool
-    , isUnsafe               :: Bool
+    , isUnsafe :: Bool
     , topName :: Maybe String
     , useXmlIsogenNaming :: UseXmlIsogenNaming
     , shouldGenerateLenses :: ShouldGenLenses
     , allowDuplicatedFields :: AllowDuplicatedFields
     , useManualVectorAlloc :: Bool
+    , processUnknownRestrictionsWithNewtype :: Bool
     } deriving Show
 
 instance Default GenerateOpts where
-    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False) (ShouldGenLenses False) (AllowDuplicatedFields False) False
+    def = GenerateOpts False False Nothing (UseXmlIsogenNaming False) (ShouldGenLenses False) (AllowDuplicatedFields False) False False
 
 data Env = Env
   { genOpts :: GenerateOpts

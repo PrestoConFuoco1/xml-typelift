@@ -166,6 +166,7 @@ optsParser =
                  <*> (ShouldGenLenses <$> switch     (long "generate-lenses"                               <> help "Generate lenses"))
                  <*> (AllowDuplicatedFields <$> switch (long "allow-duplicated-fields" <> help "Whether to allow duplicated fields"))
                  <*> switch (long "use-manual-vector-allocation" <> help "Use manual vector allocation instead of vector package (experimental)")
+                 <*> switch (long "process-unknown-restrictions-with-newtype" <> help "Process unknown restrictions (not enum) with newtypes instead of considering them equal to their base type")
                  )
              <*> (optional $
                  filenameOption (long "test-document" <> metavar "FILENAME"  <> help "Path to test document (.xml file) (turn on `--main` and turn off `--types`)"))
