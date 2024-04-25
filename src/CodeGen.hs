@@ -1195,12 +1195,34 @@ getExtractorNameWithQuant ofs inTagInfo fieldTypeName = case inTagInfo of
 
 lookupHaskellTypeBySchemaType :: QualNamespace -> XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType quals xmlType =
- let (namespaceShort, XmlNameWN -> typeName) = splitNS xmlType in
- case Map.lookup typeName knownBaseTypes of
- Just x -> pure x
- Nothing -> do
-  knownTypes_ <- Lens.use knownTypes
-  schemaTypes <- Lens.use schemaTypesMap
+  let (_namespaceShort, XmlNameWN -> typeName) = splitNS xmlType in
+  case Map.lookup typeName knownBaseTypes of
+    Just x -> pure x
+    Nothing -> do
+      knownTypes_ <- Lens.use knownTypes
+      schemaTypes <- Lens.use schemaTypesMap
+      lookupHaskellTypeBySchemaTypeGeneric "type" knownTypes_ schemaTypes processSchemaNamedType quals xmlType
+
+type SchemaMap a = Map.Map XmlNameWN [(Namespace, (a, QualNamespace))]
+type SchemaProcessedMap a = Map.Map XmlNameWN [(Namespace, a)]
+
+type SchemaTypesMap = SchemaMap Type
+type SchemaProcessedTypesMap = SchemaProcessedMap TypeWithAttrs
+
+type SchemaElementsMap = SchemaMap Type -- ?
+type SchemaProcessedElementsMap = SchemaProcessedMap TypeWithAttrs -- ?
+
+lookupHaskellTypeBySchemaTypeGeneric ::
+  (Show proc, Show unproc) =>
+  String ->
+  SchemaProcessedMap proc ->
+  SchemaMap unproc ->
+  (QualNamespace -> Namespace -> (XmlNameWN, unproc) -> CG proc) ->
+  QualNamespace ->
+  XMLString ->
+  CG proc
+lookupHaskellTypeBySchemaTypeGeneric entityType knownTypes_ schemaTypes processingFunc quals xmlType = do
+  let (namespaceShort, XmlNameWN -> typeName) = splitNS xmlType
   let withTypeNotFoundErr :: Maybe c -> c
       withTypeNotFoundErr = withTypeNotFoundErr' knownTypes_ schemaTypes
   let mbNamespace = do
@@ -1211,7 +1233,7 @@ lookupHaskellTypeBySchemaType quals xmlType =
       let typesWithName =
             withTypeNotFoundErr $
               Map.lookup typeName schemaTypes
-          q = "namespace qual: " <> show namespaceShort <> "; namespace: "
+          q = "searched entity: " <> entityType <> "; namespace qual: " <> show namespaceShort <> "; namespace: "
                 <> show mbNamespace <> " typeName: " <> show typeName <> ":\n"
           knownQuals = "known quals: " <> show quals <> "\n"
       case mbNamespace of
@@ -1228,18 +1250,20 @@ lookupHaskellTypeBySchemaType quals xmlType =
           withTypeNotFoundErr $ List.find ((== namespace_) . fst) typesWithName
 
   case Map.lookup typeName knownTypes_ of
-    Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN xmlType, knownSchType)
+    -- Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN xmlType, knownSchType)
+    Nothing -> processingFunc quals_ namespace (mkXmlNameWN xmlType, knownSchType)
     Just hTypesWithNamespaces ->
       case List.lookup namespace hTypesWithNamespaces of
-        Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN $ xmlType, knownSchType)
+        -- Nothing -> processSchemaNamedType quals_ namespace (mkXmlNameWN $ xmlType, knownSchType)
+        Nothing -> processingFunc quals_ namespace (mkXmlNameWN xmlType, knownSchType)
         Just x -> pure x
   where
   
   withTypeNotFoundErr' :: (Show a, Show b) => a -> b -> Maybe c -> c
-  withTypeNotFoundErr' knownTypes_ schemaTypes =
+  withTypeNotFoundErr' knownTypes__ schemaTypes_ =
     fromMaybe $ error $ "type not found: " <> cs xmlType <>
-      "\n known haskell types: " <> show knownTypes_ <>
-      "\n known schema types: " <> show schemaTypes
+      "\n known haskell types: " <> show knownTypes__ <>
+      "\n known schema types: " <> show schemaTypes_
 
 registerDataDeclaration :: TypeDecl -> CG ()
 registerDataDeclaration decl = typeDecls %= (decl :)
