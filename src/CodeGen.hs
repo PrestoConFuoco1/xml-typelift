@@ -1526,6 +1526,8 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
       , inTagInfo = Just $ InTagInfo{tagName = eName elt, occurs = eltToRepeatedness elt, defaultVal = elt.defaultValue}
       , possibleFirstTag = [eName elt]
       }
+  EltRef eltRef -> do
+    error "element references are not yet implemented"
   unexp -> error $ "anything other than Seq or Choice inside Complex is not supported: " <> show unexp
 
 getAttrFieldName :: HaskellTypeName -> AttrFieldGI -> CG AttrFieldGI
