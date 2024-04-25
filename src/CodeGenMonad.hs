@@ -277,6 +277,8 @@ data CGState =
   , _processedSchemaTypes :: Set.Set XMLString
   -- , _schemaTypesMap :: Map.Map XMLString Type
   , _schemaTypesMap :: Map.Map XmlNameWN [(Namespace, (Type, QualNamespace))]
+  , _knownSchemaElements :: Map.Map XmlNameWN [(Namespace, (Type, QualNamespace))]
+  , _knownElements :: Map.Map XmlNameWN [(Namespace, TypeWithAttrs)]
 
   -- FOR GENERATING
   , _indent               :: Int
@@ -366,6 +368,8 @@ initialState  = CGState
                []
                []
                Set.empty
+               Map.empty
+               Map.empty
                Map.empty
                0
 

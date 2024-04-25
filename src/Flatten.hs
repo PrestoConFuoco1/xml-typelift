@@ -60,14 +60,14 @@ newtype Flattener a =
 runFlattener ::  Schema                  -- ^ input schema
              -> (Type -> Flattener Type) -- ^ transform function
              -> (Schema, [Message])      -- ^ resulting schema and messages
-runFlattener Schema { types, tops, namespace, quals, imports, typesExtended } act =
+runFlattener Schema { types, tops, namespace, quals, imports, typesExtended, elementsExtended} act =
     evalRWS loop ScopeGlobal types
   where
     loop = do
       (unFlattener . flattenType) `mapM_` Map.keys types
       tops'      <- (unFlattener . flattenElt) `mapM` tops
       finalTypes <- get
-      return Schema { types=finalTypes, tops=tops', namespace, quals, imports, typesExtended}
+      return Schema { types=finalTypes, tops=tops', namespace, quals, imports, typesExtended, elementsExtended}
       -- TODO: flatten element types
     flattenType :: XMLString -> Flattener ()
     flattenType key =

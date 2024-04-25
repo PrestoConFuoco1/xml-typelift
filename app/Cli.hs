@@ -32,7 +32,7 @@ import           CodeGen
 import           Flatten
 import           Parser
 import           TestUtils
-import Schema (Schema (..), QualNamespace, Namespace (..), qual, name, schemaLocation, impNamespace)
+import Schema (Schema (..), QualNamespace, Namespace (..), qual, name, schemaLocation, impNamespace, Element (..))
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BSC
@@ -72,6 +72,8 @@ processSchemaRec xmlFilename = do
         Map.fromList $ map (\w -> (qual w, Namespace $ name w)) $ quals schema
       currentTypeDict1 =
         types schema <&> \t -> [(currentNamespace, (t, qualNamespace))]
+      currentElementDict1 =
+        Map.fromList (map (\elt -> (eName elt, eType elt)) $ tops schema) <&> \t -> [(currentNamespace, (t, qualNamespace))]
   childTypeDicts1 <- fmap catMaybes $ forM importedSchemas $ \(_, import_) -> do
     let schemaFileName = dropFileName xmlFilename </> BSC.unpack (schemaLocation import_)
         importNamespace = Namespace import_.impNamespace
@@ -82,6 +84,7 @@ processSchemaRec xmlFilename = do
   pure $
     schema
     { typesExtended = Map.unionsWith (++) (currentTypeDict1 : map typesExtended childTypeDicts1)
+    , elementsExtended = Map.unionsWith (++) (currentElementDict1 : map elementsExtended childTypeDicts1)
     }
 
 processSchema :: Opts -> IO ()

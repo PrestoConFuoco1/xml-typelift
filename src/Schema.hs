@@ -52,13 +52,14 @@ data Schema = Schema
   , imports   :: ![SchemaImport]
   , types     :: !TypeDict  -- ^ Types defined by name
   , typesExtended :: !TypeDict1 -- ^ hack
+  , elementsExtended :: !TypeDict1
   , tops      :: ![Element] -- ^ Possible top level elements
   , namespace :: !XMLString -- ^ Default namespace
   }
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
 
 instance Default Schema where
-  def = Schema [] [] Map.empty Map.empty [] ""
+  def = Schema [] [] Map.empty Map.empty Map.empty [] ""
 
 newtype ID = ID XMLString
   deriving (Show, Read, Eq, Ord, Generic, NFData, Data, Typeable)
