@@ -80,8 +80,8 @@ runFlattener Schema { types, tops, namespace, quals, imports, typesExtended, ele
     flattenElt elt@Element { eName, eType } =
       Flattener $
         local (const $ ScopeElement eName) $ do
-          eType' <- unFlattener $ act eType
-          return  $ elt { eType=eType' }
+          eType' <- unFlattener $ act undefined -- eType
+          return  $ elt { eType=undefined {-eType'-} }
 
 deriving instance MonadReader FScope                    Flattener
 deriving instance MonadWriter        [Message]          Flattener

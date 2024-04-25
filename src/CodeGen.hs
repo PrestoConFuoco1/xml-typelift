@@ -142,6 +142,7 @@ generateParser2 :: Bool -> GenerateOpts -> Schema -> CG ()
 generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} schema = withFourmoluDisable do
     generateModuleHeading opts
     schemaTypesMap .= Map.fromList (map (first mkXmlNameWN) $ Map.toList schema.typesExtended)
+    knownSchemaElements .= Map.fromList (map (first mkXmlNameWN) $ Map.toList schema.elementsExtended)
     --processSchemaNamedTypes schema.types
     let quals = getSchemaQualNamespace schema
     theSelectedTop <- case topName of
@@ -152,7 +153,7 @@ generateParser2 genParser opts@GenerateOpts{isGenerateMainFunction, topName} sch
       Just userTop -> case List.find (\e -> eName e == cs userTop) schema.tops of
         Nothing -> error $ "toplevel type " <> show userTop <> " not found"
         Just foundUserTop -> pure foundUserTop
-    topNameProcessed <- processType quals (Just $ mkXmlNameWN $ eName theSelectedTop) (eType theSelectedTop)
+    topNameProcessed <- processType quals (Just $ mkXmlNameWN $ eName theSelectedTop) (eTypeToplevel theSelectedTop)
     declaredTypes <- Lens.use typeDecls
     forM_ declaredTypes \case
       Alg rec -> declareAlgebraicType opts rec
@@ -1193,6 +1194,12 @@ getExtractorNameWithQuant ofs inTagInfo fieldTypeName = case inTagInfo of
   where
   plainExtract = [qc|extract{fieldTypeName}Content {ofs}|]
 
+lookupHaskellTypeBySchemaElement :: QualNamespace -> XMLString -> CG TypeWithAttrs
+lookupHaskellTypeBySchemaElement quals xmlType = do
+  knownSchemaElements_ <- Lens.use knownSchemaElements
+  knownElements_ <- Lens.use knownElements
+  lookupHaskellTypeBySchemaTypeGeneric "element" knownElements_ knownSchemaElements_ processSchemaElementType quals xmlType
+
 lookupHaskellTypeBySchemaType :: QualNamespace -> XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType quals xmlType =
   let (_namespaceShort, XmlNameWN -> typeName) = splitNS xmlType in
@@ -1261,9 +1268,12 @@ lookupHaskellTypeBySchemaTypeGeneric entityType knownTypes_ schemaTypes processi
   
   withTypeNotFoundErr' :: (Show a, Show b) => a -> b -> Maybe c -> c
   withTypeNotFoundErr' knownTypes__ schemaTypes_ =
-    fromMaybe $ error $ "type not found: " <> cs xmlType <>
-      "\n known haskell types: " <> show knownTypes__ <>
-      "\n known schema types: " <> show schemaTypes_
+    fromMaybe $ error
+      [int||
+      #{entityType} not found: #{cs xmlType :: String}
+      known haskell #{entityType}s: #{show knownTypes__}
+      known schema #{entityType}s: #{show schemaTypes_}
+      |]
 
 registerDataDeclaration :: TypeDecl -> CG ()
 registerDataDeclaration decl = typeDecls %= (decl :)
@@ -1533,6 +1543,11 @@ data TyPartInfo = TyPartInfo
   , possibleFirstTag :: [XMLString]
   }
 
+eTypeToplevel :: Element -> Type
+eTypeToplevel elt = case eType elt of
+  ElementType t -> t
+  ElementRef{} -> error "elements with element refs are not supported on toplevel"
+
 processTyPart ::
   Maybe XmlNameWN -> -- ^ possible name
   QualNamespace ->
@@ -1544,14 +1559,15 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
   Seq seqParts -> processSeq possibleName quals attrs seqParts
   Choice choiceAlts -> processChoice possibleName quals choiceAlts
   Elt elt -> do
-    eltType <- processType quals (Just $ mkXmlNameWN $ eName elt) (eType elt)
+    eltType <- case eType elt of
+      ElementType et -> processType quals (Just $ mkXmlNameWN $ eName elt) et
+      ElementRef eRef -> lookupHaskellTypeBySchemaElement quals eRef
+
     pure TyPartInfo
       { partType = eltType
       , inTagInfo = Just $ InTagInfo{tagName = eName elt, occurs = eltToRepeatedness elt, defaultVal = elt.defaultValue}
       , possibleFirstTag = [eName elt]
       }
-  EltRef eltRef -> do
-    error "element references are not yet implemented"
   unexp -> error $ "anything other than Seq or Choice inside Complex is not supported: " <> show unexp
 
 getAttrFieldName :: HaskellTypeName -> AttrFieldGI -> CG AttrFieldGI
@@ -1880,6 +1896,11 @@ registerNamedType :: XmlNameWN -> Namespace -> TypeWithAttrs -> CG ()
 registerNamedType xmlName namespace haskellType = do
   knownTypes %= Map.alter (Just . ((namespace, haskellType) :) . fromMaybe []) xmlName
 
+registerSchemaElement :: XmlNameWN -> Namespace -> TypeWithAttrs -> CG ()
+registerSchemaElement xmlName namespace haskellType = do
+  knownElements %= Map.alter (Just . ((namespace, haskellType) :) . fromMaybe []) xmlName
+
+
 processSchemaNamedType :: QualNamespace -> Namespace -> (XmlNameWN, Type) -> CG TypeWithAttrs
 processSchemaNamedType quals namespace (tName, tDef) = do
   q <- Lens.use knownTypes
@@ -1889,6 +1910,17 @@ processSchemaNamedType quals namespace (tName, tDef) = do
     _ -> do
       haskellTypeName <- processType quals (Just tName) tDef
       registerNamedType tName namespace haskellTypeName
+      pure haskellTypeName
+
+processSchemaElementType :: QualNamespace -> Namespace -> (XmlNameWN, Type) -> CG TypeWithAttrs
+processSchemaElementType quals namespace (tName, tDef) = do
+  q <- Lens.use knownElements
+  case Map.lookup tName q of
+    Just q_
+      | Just w_ <- List.lookup namespace q_ -> pure w_
+    _ -> do
+      haskellTypeName <- processType quals (Just tName) tDef
+      registerSchemaElement tName namespace haskellTypeName
       pure haskellTypeName
 
 generateModuleHeading ::

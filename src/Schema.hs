@@ -71,12 +71,20 @@ type ElementName = XMLString
 
 type NamespaceName = XMLString
 
+data ElementType
+  = ElementType Type
+  | ElementRef XMLString
+  deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)
+
+instance Default ElementType where
+  def = ElementType def
+
 data Element = Element {
     minOccurs       :: !Int
   , maxOccurs       :: !MaxOccurs
   , defaultValue :: !(Maybe XMLString)
   , eName           :: !ElementName
-  , eType           :: !Type
+  , eType           :: !ElementType
   , targetNamespace :: !NamespaceName
   , elQuals :: !QualNamespace
   }
@@ -167,7 +175,6 @@ data TyPart = Seq    [TyPart]
             | All    [TyPart]
             | Group  XMLString -- named group of elements
             | Elt    Element
-            | EltRef XMLString
             | Any (Maybe XMLString)
              -- no support for xs:all yet
   deriving (Eq, Ord, Show, Generic, NFData, Data, Typeable)

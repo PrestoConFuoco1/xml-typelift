@@ -38,6 +38,8 @@ module CodeGenMonad(-- Code generation monad
                    ,cut
                    ,warn
                    ,knownTypes
+                   ,knownSchemaElements
+                   ,knownElements
                    ,typeDecls
                    ,parseFunctions
                    ,extractFunctions

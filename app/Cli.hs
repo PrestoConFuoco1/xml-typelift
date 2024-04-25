@@ -32,7 +32,7 @@ import           CodeGen
 import           Flatten
 import           Parser
 import           TestUtils
-import Schema (Schema (..), QualNamespace, Namespace (..), qual, name, schemaLocation, impNamespace, Element (..))
+import Schema (Schema (..), QualNamespace, Namespace (..), qual, name, schemaLocation, impNamespace, Element (..), ElementType (..))
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BSC
@@ -72,8 +72,11 @@ processSchemaRec xmlFilename = do
         Map.fromList $ map (\w -> (qual w, Namespace $ name w)) $ quals schema
       currentTypeDict1 =
         types schema <&> \t -> [(currentNamespace, (t, qualNamespace))]
+      getTopEltType elt = case eType elt of
+        ElementType t -> t
+        ElementRef{} -> error "elements with element refs are not supported on toplevel"
       currentElementDict1 =
-        Map.fromList (map (\elt -> (eName elt, eType elt)) $ tops schema) <&> \t -> [(currentNamespace, (t, qualNamespace))]
+        Map.fromList (map (\elt -> (eName elt, getTopEltType elt)) $ tops schema) <&> \t -> [(currentNamespace, (t, qualNamespace))]
   childTypeDicts1 <- fmap catMaybes $ forM importedSchemas $ \(_, import_) -> do
     let schemaFileName = dropFileName xmlFilename </> BSC.unpack (schemaLocation import_)
         importNamespace = Namespace import_.impNamespace

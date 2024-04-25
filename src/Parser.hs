@@ -114,13 +114,7 @@ instance FromXML TyPart where
       "choice"  ->  parseTyPart Choice node
       "all"     ->  parseTyPart All    node
       "sequence"     ->  parseTyPart Seq    node
-      "element" -> do
-        let
-          mbRef = List.lookup "ref" $ attributes node
-        case mbRef of
-          Just eltRef -> pure $ EltRef eltRef
-          Nothing ->
-            Elt <$> fromXML    node -- fromXML Element
+      "element" -> Elt <$> fromXML    node -- fromXML Element
       "any" -> pure $ Any (List.lookup "substitute" $ attributes node)
       other     -> ("Unknown type particle '" <> bshow other <> "'" <> cs (show node)) `failHere` other
 
@@ -269,8 +263,8 @@ eltAttrHandler :: AttrHandler Element
 eltAttrHandler elt attr@(aName, aVal) =
   case splitNS aName of
     (_, "name") -> return $ elt { eName =     aVal }
-    (_, "type") -> return $ elt { eType = Ref aVal }
-    (_, "ref" ) -> "Element references cannot be used on the schema toplevel" `failHere` aName
+    (_, "type") -> return $ elt { eType = ElementType $ Ref aVal }
+    (_, "ref" ) -> return $ elt { eName = aVal, eType = ElementRef aVal}
     (_, "minOccurs") ->
       case BS.readInt aVal of
         Just  (r, "") -> return $ elt { minOccurs = r }
@@ -302,7 +296,7 @@ eltChildHandler elt node = case nodeName node of
   where
     handleType = do
       TypeDesc _ ty <- fromXML node
-      return $ elt { eType = ty }
+      return $ elt { eType = ElementType ty }
 
 instance FromXML Schema where
   fromXML  n =
