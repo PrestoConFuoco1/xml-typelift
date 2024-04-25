@@ -274,6 +274,7 @@ eltAttrHandler elt attr@(aName, aVal) =
        case readMaxOccurs aVal of
          Left  err -> Left     err
          Right r   -> return $ elt { maxOccurs = r }
+    (_, "default") -> return $ elt { defaultValue = Just aVal }
     ("xmlns", qual1) -> return $ elt {elQuals = Map.insert (Qual qual1) (Namespace aVal) (elQuals elt)}
     _ -> unknownAttrHandler "element" attr
 

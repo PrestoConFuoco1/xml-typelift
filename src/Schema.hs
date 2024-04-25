@@ -73,6 +73,7 @@ type NamespaceName = XMLString
 data Element = Element {
     minOccurs       :: !Int
   , maxOccurs       :: !MaxOccurs
+  , defaultValue :: !(Maybe XMLString)
   , eName           :: !ElementName
   , eType           :: !Type
   , targetNamespace :: !NamespaceName
@@ -84,6 +85,7 @@ instance Default Element where
   def = Element { eName           = ""
                 , minOccurs       =           1
                 , maxOccurs       = MaxOccurs 1
+                , defaultValue = Nothing
                 , eType           = def
                 , targetNamespace = "" -- inherit
                 , elQuals = Map.empty

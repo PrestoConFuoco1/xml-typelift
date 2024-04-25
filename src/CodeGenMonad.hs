@@ -88,6 +88,7 @@ module CodeGenMonad(-- Code generation monad
                    ,knownBaseTypes
                    ,mkXmlNameWN
                    ,AttrFieldGI (..)
+                   ,InTagInfo(..)
                    ) where
 
 import           Prelude                  hiding (lookup)
@@ -140,8 +141,6 @@ data TargetIdNS = TargetTypeName
                 | TargetFieldName
   deriving (Eq, Ord, Show, Enum, Bounded)
 
-type IdClass = (XMLIdNS, TargetIdNS)
-
 newtype HaskellFieldName = HaskellFieldName {unHaskellFieldName :: BS.ByteString}
   deriving newtype (Eq, Ord, Show, IsString, ShowQ)
 newtype HaskellTypeName = HaskellTypeName {unHaskellTypeName :: BS.ByteString}
@@ -179,6 +178,14 @@ data AttributesInfo
 typeNoAttrs :: HaskellTypeName -> GIType -> TypeWithAttrs
 typeNoAttrs = TypeWithAttrs
 
+data InTagInfo = InTagInfo
+  { tagName :: XMLString
+  , occurs :: Repeatedness
+  , defaultVal :: Maybe XMLString
+  -- ^ only for simple contents
+  }
+  deriving stock (Show)
+
 data GIType
   = GBaseType
   | GAttrContent ContentWithAttrsGI
@@ -211,7 +218,7 @@ data SequenceGI = SequenceGI
 
 data ChoiceGI = ChoiceGI
   { typeName :: HaskellTypeName
-  , alts :: [(Maybe (XMLString, Repeatedness), [XMLString], HaskellConsName, TypeWithAttrs)]
+  , alts :: [(Maybe InTagInfo, [XMLString], HaskellConsName, TypeWithAttrs)]
   }
   deriving stock (Show)
 
@@ -226,7 +233,7 @@ data AttrFieldGI = AttrFieldGI
 data FieldGI = FieldGI
   { haskellName :: HaskellFieldName
   , typeName :: TypeWithAttrs
-  , inTagInfo :: Maybe (XMLString, Repeatedness)
+  , inTagInfo :: Maybe InTagInfo
   }
   deriving stock (Show)
 

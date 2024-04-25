@@ -191,13 +191,13 @@ generateParserInternalStructures = do
     outCodeLine ""
 
 eltToRepeatedness :: Element -> Repeatedness
-eltToRepeatedness (Element 0 Unbounded     _ _ _ _) = RepMany
-eltToRepeatedness (Element 0 (MaxOccurs 1) _ _ _ _) = RepMaybe
-eltToRepeatedness (Element 0 _             _ _ _ _) = RepMany
-eltToRepeatedness (Element 1 (MaxOccurs 1) _ _ _ _) = RepOnce
-eltToRepeatedness (Element 1 _             _ _ _ _) = RepMany
-eltToRepeatedness (Element m Unbounded     _ _ _ _) = RepNotLess m
-eltToRepeatedness (Element m (MaxOccurs n) _ _ _ _) = RepRange m n
+eltToRepeatedness (Element 0 Unbounded     _ _ _ _ _) = RepMany
+eltToRepeatedness (Element 0 (MaxOccurs 1) _ _ _ _ _) = RepMaybe
+eltToRepeatedness (Element 0 _             _ _ _ _ _) = RepMany
+eltToRepeatedness (Element 1 (MaxOccurs 1) _ _ _ _ _) = RepOnce
+eltToRepeatedness (Element 1 _             _ _ _ _ _) = RepMany
+eltToRepeatedness (Element m Unbounded     _ _ _ _ _) = RepNotLess m
+eltToRepeatedness (Element m (MaxOccurs n) _ _ _ _ _) = RepRange m n
 
 generateParserInternalArray1 :: GenerateOpts -> (Element, TypeWithAttrs) -> CG ()
 generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
@@ -223,7 +223,7 @@ generateParserInternalArray1 GenerateOpts{isUnsafe} (topEl, topType) = do
                 outCodeLine' [qc|let arrOfs0 = 0#|]
                 outCodeLine' [qc|let strOfs0 = skipSpaces (skipHeader (skipSpaces 0#))|]
                 let
-                  parseElementCall = generateParseElementCall ("arrOfs0", "strOfs0") (Just (topTag, repeatedness)) topType
+                  parseElementCall = generateParseElementCall ("arrOfs0", "strOfs0") (Just InTagInfo{tagName=topTag, occurs=repeatedness, defaultVal = Nothing}) topType
                 outCodeLine' [qc|_ <- {parseElementCall}|]
                 outCodeLine' [qc|return ()|]
                 outCodeLine' [qc|where|]
@@ -669,6 +669,13 @@ withDefault :: String -> (XMLString -> Either String a) -> XMLString -> Maybe a 
 withDefault hsType parseRaw rawVal =
   fromMaybe $ fromRight (throw $ InternalErrorInvalidDefaultValue hsType rawVal) $ parseRaw rawVal
 
+{-# INLINE withDefaultMany #-}
+withDefaultMany :: String -> (XMLString -> Either String a) -> XMLString -> [a] -> [a]
+withDefaultMany hsType parseRaw rawVal parsedVal =
+  if null parsedVal
+  then either (\\_ -> throw $ InternalErrorInvalidDefaultValue hsType rawVal) (:[]) $ parseRaw rawVal
+  else parsedVal
+
 {-# INLINE runFlatparser #-}
 runFlatparser :: ByteString -> FP.Parser String a -> Either String a
 runFlatparser bsInp parser = fromFlatparseResult $ FP.runParser parser bsInp 
@@ -919,11 +926,13 @@ mkFieldDeclaration wrapApplication fld =
   , TyType $ mkTypeWithCardinality wrapApplication fld.inTagInfo $ B.byteString fld.typeName.type_.unHaskellTypeName
   )
 
-mkTypeWithCardinality :: Bool -> Maybe (a1, Repeatedness) -> B.Builder -> B.Builder
+mkTypeWithCardinality :: Bool -> Maybe InTagInfo -> B.Builder -> B.Builder
 mkTypeWithCardinality wrapApplication inTagInfo x = case inTagInfo of
   Nothing -> x
-  Just (_, card) -> case card of
-    RepMaybe -> wrapParens $ "Maybe " <> x
+  Just InTagInfo{occurs=card, defaultVal} -> case card of
+    RepMaybe -> case defaultVal of
+      Nothing -> wrapParens $ "Maybe " <> x
+      Just _ -> x
     RepOnce -> x
     _ -> "[" <> x <> "]"
   where
@@ -1026,7 +1035,7 @@ generateAttrsAllocation TypeWithAttrs{type_, giType} =
 
 generateParseElementCall ::
   (XMLString, XMLString) ->
-  Maybe (XMLString, Repeatedness) ->
+  Maybe InTagInfo ->
   TypeWithAttrs ->
   String
 generateParseElementCall (arrOfs, strOfs) inTagInfo typeWithAttrs = do
@@ -1039,7 +1048,7 @@ generateParseElementCall (arrOfs, strOfs) inTagInfo typeWithAttrs = do
         else ("", identity)
   let mbTagAndQuantifier = case inTagInfo of
         Nothing -> Nothing
-        Just (tagName_, card) -> Just . (tagName_,) $ case card of
+        Just InTagInfo{tagName, occurs=card} -> Just . (tagName,) $ case card of
           RepMaybe -> "inMaybeTag"
           RepOnce  -> "inOneTag"
           _        -> "inManyTags"
@@ -1161,17 +1170,28 @@ generateSequenceExtractFunctionBody s = FunctionBody $ runCodeWriter do
           [oneField] -> out1 [qc|ExtractResult ({haskellConsName} {oneField}) {ofs'}|]
           _          -> out1 [qc|ExtractResult ({haskellConsName}\{..}) {ofs'}|]
 
-getExtractorNameWithQuant :: XMLString -> Maybe (XMLString, Repeatedness) -> HaskellTypeName -> XMLString -- ? Builder
-getExtractorNameWithQuant ofs inTagInfo fieldTypeName = do
-    let (fieldQuantifier::(Maybe XMLString)) = case inTagInfo of
-          Nothing -> Nothing
-          Just (_, card) -> case card of
-            RepMaybe -> Just "extractMaybe"
-            RepOnce  -> Nothing
-            _        -> Just "extractMany" -- TODO add extractExact support
-    case fieldQuantifier of
-             Nothing   -> [qc|extract{fieldTypeName}Content {ofs}|]
-             Just qntf -> [qc|{qntf} {ofs} extract{fieldTypeName}Content|]
+getExtractorNameWithQuant :: XMLString -> Maybe InTagInfo -> HaskellTypeName -> XMLString -- ? Builder
+getExtractorNameWithQuant ofs inTagInfo fieldTypeName = case inTagInfo of
+  Nothing   -> plainExtract
+  Just InTagInfo{occurs=cardinality, defaultVal} -> do
+    let
+      mbFieldQuantifier =
+        case cardinality of
+          RepMaybe -> Just ("extractMaybe" :: XMLString)
+          RepOnce  -> Nothing
+          _        -> Just "extractMany" -- TODO add extractExact support
+      defaultModifier = case defaultVal of
+        Nothing -> "" :: String
+        Just defVal -> case cardinality of
+          RepOnce -> error "default values are not supported for mandatory elements"
+          RepMaybe -> [qc|mapExtr (withDefault "{fieldTypeName}" {getParseRawFuncName fieldTypeName} "{defVal}") $ |]
+          _ -> [qc|mapExtr (withDefaultMany "{fieldTypeName}" {getParseRawFuncName fieldTypeName} "{defVal}") $ |]
+    case mbFieldQuantifier of
+      Nothing -> plainExtract
+      Just fieldQuantifier ->
+        [qc|{defaultModifier}{fieldQuantifier} {ofs} extract{fieldTypeName}Content|]
+  where
+  plainExtract = [qc|extract{fieldTypeName}Content {ofs}|]
 
 lookupHaskellTypeBySchemaType :: QualNamespace -> XMLString -> CG TypeWithAttrs
 lookupHaskellTypeBySchemaType quals xmlType =
@@ -1440,7 +1460,7 @@ elementToField tyPart = do
   pure FieldGI
     { haskellName = case tyPart.inTagInfo of
       Nothing -> HaskellFieldName tyPart.partType.type_.unHaskellTypeName
-      Just (tagName, _) -> HaskellFieldName tagName
+      Just InTagInfo{tagName} -> HaskellFieldName tagName
     , typeName = tyPart.partType
     , inTagInfo = tyPart.inTagInfo
     }
@@ -1478,14 +1498,14 @@ processChoice mbPossibleName quals choiceAlts = do
     alts <- forM tyParts \tp -> do
       let
         altConsRaw =
-            normalizeTypeName (maybe tp.partType.type_.unHaskellTypeName fst tp.inTagInfo)
+            normalizeTypeName (maybe tp.partType.type_.unHaskellTypeName (.tagName) tp.inTagInfo)
       consName <- getUniqueConsName (CnoSum typeName) altConsRaw
       pure (tp.inTagInfo, tp.possibleFirstTag, consName, tp.partType)
     pure ChoiceGI {typeName, alts}
 
 data TyPartInfo = TyPartInfo
   { partType :: TypeWithAttrs
-  , inTagInfo :: Maybe (XMLString, Repeatedness)
+  , inTagInfo :: Maybe InTagInfo
   , possibleFirstTag :: [XMLString]
   }
 
@@ -1503,7 +1523,7 @@ processTyPart possibleName quals _mixed attrs inner = case inner of
     eltType <- processType quals (Just $ mkXmlNameWN $ eName elt) (eType elt)
     pure TyPartInfo
       { partType = eltType
-      , inTagInfo = Just (eName elt, eltToRepeatedness elt)
+      , inTagInfo = Just $ InTagInfo{tagName = eName elt, occurs = eltToRepeatedness elt, defaultVal = elt.defaultValue}
       , possibleFirstTag = [eName elt]
       }
   unexp -> error $ "anything other than Seq or Choice inside Complex is not supported: " <> show unexp
